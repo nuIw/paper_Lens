@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "arXiv Acceptance Helper",
+  "version": "0.1.0",
+  "description": "Shows venue evidence and code links, then downloads arXiv PDFs with an editable filename.",
+  "permissions": [
+    "downloads",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://arxiv.org/*",
+    "https://dblp.org/*",
+    "https://api2.openreview.net/*",
+    "https://api.openreview.net/*",
+    "https://api.github.com/*"
+  ],
+  "background": {
+    "service_worker": "src/service-worker.mjs",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://arxiv.org/abs/*"
+      ],
+      "js": [
+        "src/content-bootstrap.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/content.mjs",
+        "src/core.mjs",
+        "src/page.mjs",
+        "src/panel.css",
+        "vendor/pdf.mjs",
+        "vendor/pdf.worker.mjs"
+      ],
+      "matches": [
+        "https://arxiv.org/*"
+      ]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

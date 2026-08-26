@@ -1,0 +1,349 @@
+:host {
+  color-scheme: light dark;
+  display: block;
+  margin: 0.6rem 0 0;
+  max-width: 52rem;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.45;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+.ah-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.25rem;
+  padding: 0.42rem 0.75rem;
+  border: 1px solid #b9b5ae;
+  border-radius: 0.45rem;
+  background: #fff;
+  color: #5b1717;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ah-trigger:hover {
+  border-color: #8f2525;
+  background: #fff8f5;
+}
+
+.ah-trigger:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+a:focus-visible,
+summary:focus-visible {
+  outline: 3px solid #2b72d6;
+  outline-offset: 2px;
+}
+
+.ah-chevron {
+  font-size: 0.7rem;
+}
+
+.ah-panel {
+  margin-top: 0.55rem;
+  overflow: hidden;
+  border: 1px solid #d3cec6;
+  border-radius: 0.7rem;
+  background: #fff;
+  color: #24211e;
+  box-shadow: 0 0.3rem 1rem rgb(36 24 16 / 10%);
+}
+
+.ah-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid #e5e0d9;
+  background: #fbf8f4;
+}
+
+.ah-headline {
+  flex: 1 1 20rem;
+  font-size: 1.02rem;
+  font-weight: 750;
+}
+
+.ah-badge,
+.ah-cache {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.55rem;
+  padding: 0.15rem 0.48rem;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 750;
+}
+
+.ah-badge--verified {
+  background: #daf4e4;
+  color: #135c36;
+}
+
+.ah-badge--probable,
+.ah-badge--metadata_only {
+  background: #fff0c7;
+  color: #684d00;
+}
+
+.ah-badge--conflicting {
+  background: #fee2e2;
+  color: #8a1c1c;
+}
+
+.ah-badge--unverified,
+.ah-cache {
+  background: #ece9e5;
+  color: #4d4944;
+}
+
+.ah-section {
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid #ece8e2;
+}
+
+.ah-section:last-child {
+  border-bottom: 0;
+}
+
+.ah-section-heading {
+  margin-bottom: 0.45rem;
+  color: #514b45;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.ah-download-controls {
+  display: grid;
+  grid-template-columns: minmax(9rem, 0.8fr) minmax(14rem, 2fr) auto;
+  gap: 0.45rem;
+}
+
+.ah-select,
+.ah-filename {
+  min-width: 0;
+  min-height: 2.35rem;
+  border: 1px solid #bbb5ad;
+  border-radius: 0.38rem;
+  background: #fff;
+  color: #24211e;
+  padding: 0.4rem 0.55rem;
+}
+
+.ah-primary,
+.ah-secondary,
+.ah-icon-button {
+  min-height: 2.35rem;
+  border-radius: 0.38rem;
+  cursor: pointer;
+}
+
+.ah-primary {
+  border: 1px solid #7b1f1f;
+  background: #8f2525;
+  color: #fff;
+  padding: 0.42rem 0.75rem;
+  font-weight: 750;
+}
+
+.ah-secondary,
+.ah-icon-button {
+  border: 1px solid #bbb5ad;
+  background: #fff;
+  color: #443f3a;
+  padding: 0.38rem 0.65rem;
+}
+
+.ah-icon-button {
+  min-height: 1.8rem;
+  font-size: 0.78rem;
+}
+
+button:disabled,
+button[aria-disabled="true"] {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.ah-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.55rem;
+  color: #514b45;
+  font-size: 0.82rem;
+}
+
+.ah-live {
+  margin-left: 0.7rem;
+  color: #28613f;
+  font-size: 0.82rem;
+}
+
+.ah-link-list,
+.ah-github-list {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0 0 0.65rem;
+  padding-left: 1.2rem;
+}
+
+.ah-link {
+  color: #185aa6;
+  font-weight: 700;
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.13em;
+}
+
+.ah-evidence,
+.ah-record-facts,
+.ah-record-raw,
+.ah-record-evidence,
+.ah-muted,
+.ah-progress,
+.ah-candidate-label,
+.ah-manual-link,
+.ah-source {
+  color: #655f58;
+  font-size: 0.8rem;
+}
+
+.ah-github-item {
+  display: grid;
+  gap: 0.08rem;
+}
+
+.ah-candidate-label {
+  margin: 0.65rem 0 0.35rem;
+  font-weight: 750;
+}
+
+.ah-manual-link {
+  display: inline-block;
+  margin-top: 0.45rem;
+}
+
+.ah-error,
+.ah-source--error {
+  color: #9a2020;
+  font-size: 0.82rem;
+}
+
+.ah-records {
+  margin-top: 0.7rem;
+  border-top: 1px solid #e5e0d9;
+}
+
+.ah-record-summary {
+  padding: 0.7rem 0 0;
+  color: #514b45;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.ah-record {
+  margin-top: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  border-left: 3px solid #b8b1a8;
+  border-radius: 0.25rem;
+  background: #faf8f5;
+}
+
+.ah-record--verified {
+  border-left-color: #2c8a55;
+}
+
+.ah-record--candidate {
+  border-left-style: dashed;
+}
+
+.ah-record-title {
+  font-weight: 750;
+}
+
+.ah-extraction-error {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #e1a7a7;
+  border-radius: 0.4rem;
+  background: #fff2f2;
+  color: #8a1c1c;
+  font-size: 0.82rem;
+}
+
+@media (max-width: 720px) {
+  .ah-download-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .ah-primary {
+    width: 100%;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .ah-trigger,
+  .ah-panel,
+  .ah-select,
+  .ah-filename,
+  .ah-secondary,
+  .ah-icon-button {
+    border-color: #605b56;
+    background: #242220;
+    color: #f4f0eb;
+  }
+
+  .ah-trigger {
+    color: #f0b5ad;
+  }
+
+  .ah-trigger:hover,
+  .ah-header,
+  .ah-record {
+    background: #302c29;
+  }
+
+  .ah-panel {
+    border-color: #5f5953;
+    color: #f4f0eb;
+    box-shadow: 0 0.3rem 1rem rgb(0 0 0 / 30%);
+  }
+
+  .ah-header,
+  .ah-section,
+  .ah-records {
+    border-color: #4b4641;
+  }
+
+  .ah-section-heading,
+  .ah-checkbox,
+  .ah-evidence,
+  .ah-record-facts,
+  .ah-record-raw,
+  .ah-record-evidence,
+  .ah-muted,
+  .ah-progress,
+  .ah-candidate-label,
+  .ah-manual-link,
+  .ah-source,
+  .ah-record-summary {
+    color: #c8c0b7;
+  }
+
+  .ah-link {
+    color: #8cc4ff;
+  }
+}
