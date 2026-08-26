@@ -6,8 +6,10 @@ import {
   buildGitHubSearch,
   buildOpenReviewForumUrl,
   buildOpenReviewSearchUrl,
+  officialProceedingsCandidates,
   parseDblp,
   parseGitHub,
+  parseOfficialProceedings,
   parseOpenReviewForum,
   parseOpenReviewSearch,
 } from "../src/sources.mjs";
@@ -42,6 +44,7 @@ test("DBLP accepts both one-author objects and author arrays", () => {
   assert.equal(records[0].decisionRaw, "Published");
   assert.equal(records[0].source, "dblp");
   assert.ok(records[0].matchScore >= 0.9);
+  assert.equal(records[1].publicationDoi, "10.1/example");
 });
 
 test("DBLP CoRR entries remain preprints rather than accepted publications", () => {
@@ -59,6 +62,71 @@ test("DBLP CoRR entries remain preprints rather than accepted publications", () 
 
 test("malformed DBLP payload is a source error rather than an empty result", () => {
   assert.throws(() => parseDblp({ nope: true }, paper), /Malformed DBLP response/);
+});
+
+test("official proceedings follow-up uses only recognized URLs supplied by DBLP", () => {
+  const records = parseDblp({ result: { hits: { hit: [{ info: {
+    title: "Paper",
+    authors: { author: { text: "Alice Kim" } },
+    venue: "ACL",
+    ee: [
+      "https://doi.org/10.1/example",
+      "https://aclanthology.org/2025.acl-main.1/",
+      "https://example.org/untrusted",
+    ],
+  } }] } } }, paper);
+  const candidates = officialProceedingsCandidates(records);
+  assert.deepEqual(candidates.map(({ url, provider }) => ({ url, provider })), [{
+    url: "https://aclanthology.org/2025.acl-main.1/",
+    provider: "ACL Anthology",
+  }]);
+});
+
+test("official proceedings metadata verifies only an explicit official track", () => {
+  const candidate = {
+    url: "https://aclanthology.org/2025.acl-main.1/",
+    provider: "ACL Anthology",
+    record: { venueRaw: "ACL", year: 2025, publicationDoi: "10.1/example" },
+  };
+  const record = parseOfficialProceedings(`
+    <meta name="citation_title" content="Paper">
+    <meta name="citation_author" content="Alice Kim">
+    <meta name="citation_conference_title" content="ACL 2025 Main Conference">
+    <meta name="citation_doi" content="10.2/official">
+  `, candidate, paper);
+  assert.equal(record.source, "proceedings");
+  assert.equal(record.trackRaw, "Main");
+  assert.equal(record.trackEvidence, "official");
+  assert.equal(record.publicationDoi, "10.2/official");
+  assert.ok(record.matchScore >= 0.9);
+});
+
+test("PMLR publication metadata does not invent a Main track", () => {
+  const record = parseOfficialProceedings(
+    '<meta name="citation_title" content="Paper"><meta name="citation_author" content="Alice Kim">',
+    {
+      url: "https://proceedings.mlr.press/v999/paper.html",
+      provider: "PMLR",
+      record: { venueRaw: "Example Conference", year: 2025 },
+    },
+    paper,
+  );
+  assert.equal(record.trackRaw, "");
+  assert.equal(record.trackEvidence, "none");
+});
+
+test("official pages without author meta retain identity through the strong DBLP link", () => {
+  const record = parseOfficialProceedings(
+    '<meta name="citation_title" content="Paper">',
+    {
+      url: "https://proceedings.neurips.cc/paper/2025/hash/example-Abstract.html",
+      provider: "NeurIPS Proceedings",
+      record: { authors: ["Alice Kim"], venueRaw: "NeurIPS", year: 2025 },
+    },
+    paper,
+  );
+  assert.equal(record.identityEvidence, "dblp-publication-link");
+  assert.ok(record.matchScore >= 0.9);
 });
 
 test("OpenReview search URLs cover v2 and legacy v1 without venue filters", () => {

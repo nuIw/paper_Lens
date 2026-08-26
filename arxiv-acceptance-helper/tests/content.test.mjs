@@ -36,7 +36,8 @@ test("extracts required metadata from the arXiv abstract page contract", () => {
     arxivId: "hep-th/9901001",
     title: "A Small Paper",
     authors: ["Alice Kim", "Bob Lee"],
-    doi: "10.1000/XYZ",
+    arxivDoi: "",
+    publicationDoi: "10.1000/XYZ",
     comment: "Accepted at ExampleConf",
     abstract: "Short abstract",
     year: 1999,
@@ -45,7 +46,7 @@ test("extracts required metadata from the arXiv abstract page contract", () => {
   });
 });
 
-test("publisher DOI is preferred over arXiv's own DataCite DOI", () => {
+test("arXiv DataCite DOI and publication DOI remain separate", () => {
   const doc = {
     querySelector: (selector) => ({
       "h1.title": node("Title: Paper"),
@@ -60,10 +61,12 @@ test("publisher DOI is preferred over arXiv's own DataCite DOI", () => {
       return [];
     },
   };
-  assert.equal(extractPaper(doc, {
+  const extracted = extractPaper(doc, {
     pathname: "/abs/1706.03762",
     href: "https://arxiv.org/abs/1706.03762",
-  }).doi, "10.5555/publisher");
+  });
+  assert.equal(extracted.arxivDoi, "10.48550/arXiv.1706.03762");
+  assert.equal(extracted.publicationDoi, "10.5555/publisher");
 });
 
 test("page-link collection stays inside paper-specific metadata regions", () => {

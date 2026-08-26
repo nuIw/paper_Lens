@@ -24,6 +24,15 @@ test("normalizes author strings and DBLP-style author objects", () => {
   );
 });
 
+test("matches family-name-first proceedings authors", () => {
+  const match = scorePaperMatch(
+    { title: "Paper", authors: ["Ashish Vaswani"], year: 2025 },
+    { title: "Paper", authors: ["Vaswani, Ashish"], year: 2025 },
+  );
+  assert.equal(match.kind, "title-authors");
+  assert.equal(match.score, 1);
+});
+
 test("an exact DOI is a verified identity match", () => {
   assert.deepEqual(
     scorePaperMatch(
@@ -41,6 +50,14 @@ test("different DOI punctuation cannot collapse into an identifier match", () =>
   );
   assert.notEqual(match.kind, "identifier");
   assert.notEqual(match.score, 1);
+});
+
+test("arXiv DataCite DOI is not used as a publication DOI match", () => {
+  const match = scorePaperMatch(
+    { title: "One", authors: ["Alice Kim"], arxivDoi: "10.48550/arXiv.2501.00001" },
+    { title: "Different", authors: ["Other Person"], publicationDoi: "10.48550/arXiv.2501.00001" },
+  );
+  assert.notEqual(match.kind, "identifier");
 });
 
 test("matching title and author creates a strong metadata match", () => {
@@ -163,18 +180,63 @@ test("strongly matched but uninterpretable metadata is labeled metadata-only", (
   assert.equal(result.records[0].confidence, "metadata_only");
 });
 
-test("alias filename uses text before the first colon and appends arXiv ID", () => {
+test("DBLP verifies identity without claiming verified decision or track", () => {
+  const result = resolveRecords([{
+    source: "dblp",
+    venueRaw: "ACL",
+    decisionRaw: "Published",
+    trackRaw: "",
+    matchScore: 1,
+    matchKind: "identifier",
+  }]);
+  assert.deepEqual(result.verificationAxes, {
+    identity: "verified",
+    decision: "metadata_only",
+    track: "unverified",
+  });
+  assert.equal(result.verification, "probable");
+});
+
+test("official proceedings can verify decision and an explicit track", () => {
+  const result = resolveRecords([{
+    source: "proceedings",
+    venueRaw: "ACL 2025 Main Conference",
+    decisionRaw: "Published",
+    trackRaw: "Main",
+    trackEvidence: "official",
+    matchScore: 0.95,
+    matchKind: "title-authors",
+  }]);
+  assert.deepEqual(result.verificationAxes, {
+    identity: "probable",
+    decision: "verified",
+    track: "verified",
+  });
+  assert.equal(result.verification, "verified");
+});
+
+test("short filename uses text before the first colon and one separator before arXiv ID", () => {
   assert.equal(
     buildFilename({ title: "Attention: A/B?", arxivId: "1706.03762" }, "alias"),
-    "Attention__1706.03762.pdf",
+    "Attention_1706.03762.pdf",
   );
 });
 
 test("filename modes remain editable and portable", () => {
   const paper = { title: "A/B: C?", arxivId: "hep-th/9901001" };
-  assert.equal(buildFilename(paper, "full"), "A_B_ C___hep-th_9901001.pdf");
+  assert.equal(buildFilename(paper, "full"), "A_B_ C_hep-th_9901001.pdf");
   assert.equal(buildFilename(paper, "id"), "hep-th_9901001.pdf");
   assert.equal(buildFilename(paper, "custom", " my result "), "my result.pdf");
+});
+
+test("generated filenames keep one separator and retain the arXiv ID after truncation", () => {
+  assert.equal(
+    buildFilename({ title: "Why?", arxivId: "2501.00001" }),
+    "Why_2501.00001.pdf",
+  );
+  const filename = buildFilename({ title: "논문".repeat(100), arxivId: "2501.00001" });
+  assert.ok(new TextEncoder().encode(filename).length <= 180);
+  assert.match(filename, /_2501\.00001\.pdf$/);
 });
 
 test("sanitizer blocks paths, dot names, Windows device names, and overlong names", () => {

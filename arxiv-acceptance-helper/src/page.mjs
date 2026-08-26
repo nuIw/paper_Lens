@@ -123,6 +123,11 @@ export function panelViewModel(analysis = {}, now = Date.now()) {
   const cacheLabel = analysis.fromCache && Number.isFinite(age)
     ? `cached ${age < 60_000 ? "just now" : age < 3_600_000 ? `${Math.floor(age / 60_000)}m ago` : `${Math.floor(age / 3_600_000)}h ago`}`
     : "";
+  const verificationAxes = analysis.verificationAxes ?? {
+    identity: analysis.verification ?? "unverified",
+    decision: "unverified",
+    track: "unverified",
+  };
 
   return {
     verification: analysis.verification ?? "unverified",
@@ -130,5 +135,9 @@ export function panelViewModel(analysis = {}, now = Date.now()) {
     headline: parts.join(" · "),
     records: [...(analysis.records ?? [])].sort((left, right) => Number(right.year ?? 0) - Number(left.year ?? 0)),
     cacheLabel,
+    verificationAxes,
+    verificationAxesLabel: ["identity", "decision", "track"]
+      .map((axis) => `${axis[0].toUpperCase()}${axis.slice(1)} ${displayValue(verificationAxes[axis])}`)
+      .join(" · "),
   };
 }

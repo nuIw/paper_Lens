@@ -4,13 +4,19 @@ import {
   buildGitHubSearch,
   buildOpenReviewForumUrl,
   buildOpenReviewSearchUrl,
+  officialProceedingsCandidates,
   parseDblp,
   parseGitHub,
+  parseOfficialProceedings,
   parseOpenReviewForum,
   parseOpenReviewSearch,
 } from "./sources.mjs";
 import {
+  buildCacheEntry,
+  CACHE_ERROR_TTL_MS,
   cacheKey,
+  GITHUB_CACHE_TTL_MS,
+  githubCacheKey,
   isFreshCache,
   isTrustedSender,
   validateMessage,
@@ -22,7 +28,7 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function openReviewChallengeUrl(paper, forumId = "") {
+function openReviewManualUrl(paper, forumId = "") {
   const target = new URL(forumId ? "/forum" : "/search", "https://openreview.net");
   if (forumId) {
     target.searchParams.set("id", forumId);
@@ -34,38 +40,75 @@ function openReviewChallengeUrl(paper, forumId = "") {
       source: "forum",
     });
   }
-  const challenge = new URL("/challenge", "https://openreview.net");
-  challenge.searchParams.set("redirect", `${target.pathname}${target.search}`);
-  return challenge.href;
+  return target.href;
 }
 
-export function createService({ fetchImpl, storageLocal, downloads, now = Date.now }) {
-  async function fetchJson(url, headers = {}) {
+export function createService({ fetchImpl, storageLocal, storageSession, downloads, now = Date.now }) {
+  const githubRequests = new Map();
+
+  async function fetchWithTimeout(url, headers) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-      const response = await fetchImpl(url, { headers, signal: controller.signal });
-      let payload;
-      try {
-        payload = await response.json();
-      } catch (error) {
-        if (response.ok) throw error;
-      }
-      if (!response.ok) {
-        const detail = typeof payload?.message === "string" && payload.message.trim()
-          ? `${payload.message.trim()} (HTTP ${response.status})`
-          : `HTTP ${response.status}`;
-        const error = new Error(detail);
-        error.status = response.status;
-        error.rateRemaining = response.headers.get("x-ratelimit-remaining");
-        error.challengeRequired = response.status === 403
-          && payload?.name === "ChallengeRequiredError";
-        throw error;
-      }
-      return { payload, response };
+      return await fetchImpl(url, { headers, signal: controller.signal });
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  async function fetchJson(url, headers = {}) {
+    const response = await fetchWithTimeout(url, headers);
+    const isOpenReview = new URL(url).hostname.endsWith("openreview.net");
+    const challengeCopy = isOpenReview && typeof response.clone === "function" ? response.clone() : null;
+    let payload;
+    let challengeHtml = false;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      const html = challengeCopy && typeof challengeCopy.text === "function"
+        ? await challengeCopy.text()
+        : "";
+      challengeHtml = /<title[^>]*>[^<]*(?:challenge|verification)|captcha|challenge-platform/i.test(html);
+      if (response.ok) {
+        if (challengeHtml) {
+          const challenge = new Error("OpenReview requires interactive verification.");
+          challenge.challengeRequired = true;
+          challenge.manualRequired = true;
+          throw challenge;
+        }
+        throw error;
+      }
+    }
+    const redirectedToChallenge = isOpenReview && response.redirected
+      && /\/challenge(?:[/?#]|$)/i.test(String(response.url ?? ""));
+    if (!response.ok) {
+      const detail = typeof payload?.message === "string" && payload.message.trim()
+        ? `${payload.message.trim()} (HTTP ${response.status})`
+        : `HTTP ${response.status}`;
+      const error = new Error(detail);
+      error.status = response.status;
+      error.rateRemaining = response.headers.get("x-ratelimit-remaining");
+      error.challengeRequired = isOpenReview && (
+        payload?.name === "ChallengeRequiredError"
+        || redirectedToChallenge
+        || challengeHtml
+      );
+      error.manualRequired = error.challengeRequired || (isOpenReview && response.status === 429);
+      throw error;
+    }
+    if (redirectedToChallenge || (isOpenReview && payload?.name === "ChallengeRequiredError")) {
+      const error = new Error("OpenReview requires interactive verification.");
+      error.challengeRequired = true;
+      error.manualRequired = true;
+      throw error;
+    }
+    return { payload, response };
+  }
+
+  async function fetchText(url) {
+    const response = await fetchWithTimeout(url, { Accept: "text/html,application/xhtml+xml" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.text();
   }
 
   async function collectDblp(paper) {
@@ -81,7 +124,8 @@ export function createService({ fetchImpl, storageLocal, downloads, now = Date.n
     const candidates = parseOpenReviewSearch(payload, paper, version);
     const strong = candidates
       .filter((record) => record.matchScore >= AUTO_MATCH_THRESHOLD)
-      .sort((left, right) => right.matchScore - left.matchScore);
+      .sort((left, right) => right.matchScore - left.matchScore)
+      .slice(0, 2);
     const expanded = await Promise.all(strong.map(async (record) => {
       try {
         const forum = await fetchJson(buildOpenReviewForumUrl(record.forumId, version), { Accept: "application/json" });
@@ -90,8 +134,8 @@ export function createService({ fetchImpl, storageLocal, downloads, now = Date.n
         return [{
           ...record,
           collectionWarning: `Forum lookup failed: ${errorMessage(error)}`,
-          ...(error.challengeRequired
-            ? { collectionWarningUrl: openReviewChallengeUrl(paper, record.forumId) }
+          ...(error.manualRequired
+            ? { collectionWarningUrl: openReviewManualUrl(paper, record.forumId) }
             : {}),
         }];
       }
@@ -110,6 +154,10 @@ export function createService({ fetchImpl, storageLocal, downloads, now = Date.n
       }
     } catch (error) {
       v2Error = error;
+      if (error?.manualRequired) {
+        error.manualUrl = openReviewManualUrl(paper);
+        throw error;
+      }
     }
     try {
       const v1Records = await collectOpenReviewVersion(paper, 1);
@@ -119,24 +167,34 @@ export function createService({ fetchImpl, storageLocal, downloads, now = Date.n
         version: 1,
       };
       if (v2Error) result.warning = `OpenReview v2 search failed: ${errorMessage(v2Error)}`;
-      if (v2Error?.challengeRequired) result.manualUrl = openReviewChallengeUrl(paper);
+      if (v2Error?.manualRequired) result.manualUrl = openReviewManualUrl(paper);
       return result;
     } catch (error) {
       const failure = new Error(
         `OpenReview v2: ${errorMessage(v2Error ?? "no usable candidates")}; v1: ${errorMessage(error)}`,
       );
-      if (v2Error?.challengeRequired || error?.challengeRequired) {
-        failure.manualUrl = openReviewChallengeUrl(paper);
+      if (v2Error?.manualRequired || error?.manualRequired) {
+        failure.manualUrl = openReviewManualUrl(paper);
       }
       throw failure;
     }
+  }
+
+  async function collectProceedings(paper, dblpRecords) {
+    const candidates = officialProceedingsCandidates(
+      dblpRecords.filter((record) => record.matchScore >= AUTO_MATCH_THRESHOLD),
+    );
+    const results = await Promise.allSettled(candidates.map(async (candidate) => (
+      parseOfficialProceedings(await fetchText(candidate.url), candidate, paper)
+    )));
+    return { candidates, results };
   }
 
   async function analyze(paper, refresh) {
     const key = cacheKey(paper.arxivId);
     if (!refresh) {
       const cached = (await storageLocal.get(key))[key];
-      if (isFreshCache(cached, now())) return { ...cached.data, fromCache: true };
+      if (isFreshCache(cached, paper, now())) return { ...cached.data, fromCache: true };
     }
 
     const [dblp, openreview] = await Promise.allSettled([
@@ -145,7 +203,14 @@ export function createService({ fetchImpl, storageLocal, downloads, now = Date.n
     ]);
     const dblpRecords = dblp.status === "fulfilled" ? dblp.value : [];
     const openreviewRecords = openreview.status === "fulfilled" ? openreview.value.records : [];
-    const resolved = resolveRecords([...dblpRecords, ...openreviewRecords]);
+    const proceedings = await collectProceedings(paper, dblpRecords);
+    const proceedingsRecords = proceedings.results
+      .filter((result) => result.status === "fulfilled")
+      .map((result) => result.value);
+    const proceedingsErrors = proceedings.results
+      .filter((result) => result.status === "rejected")
+      .map((result) => errorMessage(result.reason));
+    const resolved = resolveRecords([...dblpRecords, ...openreviewRecords, ...proceedingsRecords]);
     const savedAt = now();
     const data = {
       ...resolved,
@@ -167,6 +232,14 @@ export function createService({ fetchImpl, storageLocal, downloads, now = Date.n
               count: 0,
               error: errorMessage(openreview.reason),
             },
+        proceedings: proceedings.candidates.length
+          ? {
+              status: proceedingsRecords.length ? "success" : "error",
+              count: proceedingsRecords.length,
+              ...(proceedingsErrors.length ? { warning: proceedingsErrors.join("; ") } : {}),
+              ...(!proceedingsRecords.length ? { error: proceedingsErrors.join("; ") } : {}),
+            }
+          : { status: "empty", count: 0 },
       },
     };
     const warnings = [...new Set([
@@ -181,7 +254,10 @@ export function createService({ fetchImpl, storageLocal, downloads, now = Date.n
     if (openReviewManualUrl) data.sources.openreview.manualUrl = openReviewManualUrl;
     if (dblp.status === "fulfilled" || openreview.status === "fulfilled") {
       try {
-        await storageLocal.set({ [key]: { savedAt, data } });
+        const hasSourceError = Object.values(data.sources).some((source) => source.status === "error");
+        const entry = buildCacheEntry(paper, data, savedAt, hasSourceError ? CACHE_ERROR_TTL_MS : undefined);
+        data.expiresAt = entry.expiresAt;
+        await storageLocal.set({ [key]: entry });
       } catch (error) {
         data.cacheWarning = `Cache unavailable: ${errorMessage(error)}`;
       }
@@ -190,21 +266,51 @@ export function createService({ fetchImpl, storageLocal, downloads, now = Date.n
   }
 
   async function searchGitHub(paper) {
+    const key = githubCacheKey(paper.arxivId);
+    if (storageSession) {
+      try {
+        const cached = (await storageSession.get(key))[key];
+        if (isFreshCache(cached, paper, now())) return { ...cached.data, fromCache: true };
+      } catch {
+        // A session-cache failure must not block the explicit search.
+      }
+    }
+    if (githubRequests.has(key)) return githubRequests.get(key);
+
     const search = buildGitHubSearch(paper.title);
-    try {
+    const request = (async () => {
       const { payload, response } = await fetchJson(search.apiUrl, {
         Accept: "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
       });
-      return {
+      const savedAt = now();
+      const data = {
         candidates: parseGitHub(payload),
         manualUrl: search.webUrl,
         rateRemaining: Number(response.headers.get("x-ratelimit-remaining")),
+        savedAt,
+        fromCache: false,
       };
+      if (storageSession) {
+        const entry = buildCacheEntry(paper, data, savedAt, GITHUB_CACHE_TTL_MS);
+        data.expiresAt = entry.expiresAt;
+        try {
+          await storageSession.set({ [key]: entry });
+        } catch {
+          // The network result remains usable without the optional cache.
+        }
+      }
+      return data;
+    })();
+    githubRequests.set(key, request);
+    try {
+      return await request;
     } catch (error) {
       const failure = new Error(`GitHub search failed: ${errorMessage(error)}`);
       failure.data = { manualUrl: search.webUrl, rateRemaining: Number(error.rateRemaining) };
       throw failure;
+    } finally {
+      githubRequests.delete(key);
     }
   }
 
@@ -234,6 +340,7 @@ if (globalThis.chrome?.runtime?.onMessage) {
   const service = createService({
     fetchImpl: globalThis.fetch.bind(globalThis),
     storageLocal: chrome.storage.local,
+    storageSession: chrome.storage.session,
     downloads: chrome.downloads,
   });
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

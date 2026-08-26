@@ -28,15 +28,17 @@ export function extractPaper(doc, location) {
   if (!arxivId || !title || !authors.length || !pdfUrl) {
     throw new Error("Could not read the arXiv paper metadata.");
   }
-  const doiUrl = [...doc.querySelectorAll("a[href^='https://doi.org/']")]
-    .map((anchor) => anchor.href)
-    .find((href) => !/^https?:\/\/doi\.org\/10\.48550\/arxiv\./i.test(href)) ?? "";
+  const doiUrls = [...doc.querySelectorAll("a[href^='https://doi.org/']")]
+    .map((anchor) => anchor.href);
+  const arxivDoiUrl = doiUrls.find((href) => /^https?:\/\/doi\.org\/10\.48550\/arxiv\./i.test(href)) ?? "";
+  const publicationDoiUrl = doiUrls.find((href) => !/^https?:\/\/doi\.org\/10\.48550\/arxiv\./i.test(href)) ?? "";
   const history = doc.querySelector(".submission-history")?.textContent ?? "";
   return {
     arxivId,
     title,
     authors,
-    doi: doiUrl.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, ""),
+    arxivDoi: arxivDoiUrl.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, ""),
+    publicationDoi: publicationDoiUrl.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, ""),
     comment: metadataValue(doc, "Comments:"),
     abstract: cleanArxivLabel(doc.querySelector("blockquote.abstract")?.textContent, "Abstract:"),
     year: Number(history.match(/\b(19|20)\d{2}\b/)?.[0]) || null,
@@ -142,7 +144,8 @@ export function collectPageLinks(doc) {
 function sourceStatus(state, source) {
   if (!state) return null;
   const row = element("div", `ah-source ah-source--${state.status}`);
-  const label = source === "openreview" ? "OpenReview" : source.toUpperCase();
+  const label = ({ openreview: "OpenReview", proceedings: "Official proceedings" })[source]
+    ?? source.toUpperCase();
   if (state.status === "error") row.textContent = `⚠ ${label}: ${state.error}`;
   else if (state.status === "empty") row.textContent = `— ${label}: no record found`;
   else if (state.warning) row.textContent = `⚠ ${label}: ${state.count} record${state.count === 1 ? "" : "s"} — ${state.warning}`;
@@ -341,6 +344,13 @@ async function mount() {
         displayValue(record.confidence),
       ].filter(Boolean).join(" · ");
       item.append(element("div", "ah-record-facts", facts));
+      if (record.verification) {
+        item.append(element(
+          "div",
+          "ah-record-facts",
+          `Identity ${displayValue(record.verification.identity)} · Decision ${displayValue(record.verification.decision)} · Track ${displayValue(record.verification.track)}`,
+        ));
+      }
       const raw = [
         record.decisionRaw ? `decision: ${record.decisionRaw}` : "",
         record.trackRaw ? `track: ${record.trackRaw}` : "",
@@ -388,7 +398,7 @@ async function mount() {
 
       const header = element("header", "ah-header");
       if (state.analysisStatus === "loading") {
-        header.append(element("div", "ah-headline", "Checking DBLP and OpenReview…"));
+        header.append(element("div", "ah-headline", "Checking publication evidence…"));
       } else if (state.analysisStatus === "error") {
         header.append(element("div", "ah-headline", "Metadata lookup unavailable"));
         header.append(element("p", "ah-error", state.analysisError));
@@ -397,6 +407,7 @@ async function mount() {
         header.append(element("div", "ah-headline", view.headline));
         const badge = element("span", `ah-badge ah-badge--${view.verification}`, view.verificationLabel);
         header.append(badge);
+        header.append(element("div", "ah-verification-axes", view.verificationAxesLabel));
         if (view.cacheLabel) header.append(element("span", "ah-cache", view.cacheLabel));
       }
       const refresh = element("button", "ah-icon-button", "Refresh evidence");
@@ -416,7 +427,7 @@ async function mount() {
       mode.dataset.focusKey = "filename-mode";
       mode.setAttribute("aria-label", "Filename format");
       for (const [value, label] of [
-        ["alias", "Alias + arXiv ID"],
+        ["alias", "Short title + arXiv ID"],
         ["full", "Full title + arXiv ID"],
         ["id", "arXiv ID only"],
         ["custom", "Custom"],

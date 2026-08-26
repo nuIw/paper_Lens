@@ -76,6 +76,12 @@ summary:focus-visible {
   font-weight: 750;
 }
 
+.ah-verification-axes {
+  flex: 1 0 100%;
+  color: #5c5650;
+  font-size: 0.78rem;
+}
+
 .ah-badge,
 .ah-cache {
   display: inline-flex;

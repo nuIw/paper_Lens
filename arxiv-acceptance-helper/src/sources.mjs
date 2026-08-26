@@ -11,6 +11,10 @@ function first(value) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function list(value) {
+  return (Array.isArray(value) ? value : value ? [value] : []).map(String);
+}
+
 function yearFrom(...values) {
   for (const value of values) {
     const match = String(value ?? "").match(/\b(19|20)\d{2}\b/);
@@ -35,8 +39,9 @@ export function parseDblp(payload, paper) {
   const hits = payload?.result?.hits?.hit;
   if (!Array.isArray(hits)) throw new TypeError("Malformed DBLP response.");
   return hits.map(({ info = {} }) => {
-    const ee = first(info.ee);
-    const arxiv = [ee, info.url].find((value) => /arxiv\.org\/(?:abs|pdf)\//i.test(String(value ?? "")));
+    const publicationUrls = list(info.ee);
+    const ee = first(publicationUrls);
+    const arxiv = [...publicationUrls, info.url].find((value) => /arxiv\.org\/(?:abs|pdf)\//i.test(String(value ?? "")));
     const preprint = String(info.venue ?? "").toLowerCase() === "corr"
       || /^journals\/corr\//i.test(String(info.key ?? ""))
       || /informal/i.test(String(info.type ?? ""));
@@ -51,12 +56,120 @@ export function parseDblp(payload, paper) {
       trackRaw: "",
       presentationRaw: "",
       year: Number(info.year) || null,
-      doi: info.doi ?? "",
+      publicationDoi: info.doi ?? "",
+      publicationUrls,
       arxivId: arxiv ? String(arxiv).match(/(?:abs|pdf)\/([^?#]+)/i)?.[1] ?? "" : "",
       evidenceType: "publication",
       raw: info,
     };
     return matchFields(paper, record);
+  });
+}
+
+const PROCEEDINGS_HOSTS = new Map([
+  ["openaccess.thecvf.com", "CVF Open Access"],
+  ["aclanthology.org", "ACL Anthology"],
+  ["proceedings.mlr.press", "PMLR"],
+  ["proceedings.neurips.cc", "NeurIPS Proceedings"],
+]);
+
+function proceedingsUrl(value) {
+  try {
+    const url = new URL(value);
+    const provider = PROCEEDINGS_HOSTS.get(url.hostname.replace(/^www\./, ""));
+    if (!provider || !/^https?:$/.test(url.protocol) || url.username || url.password) return null;
+    url.protocol = "https:";
+    url.hash = "";
+    return { url: url.href, provider };
+  } catch {
+    return null;
+  }
+}
+
+export function officialProceedingsCandidates(records = []) {
+  const candidates = new Map();
+  for (const record of records) {
+    for (const value of record.publicationUrls ?? []) {
+      const candidate = proceedingsUrl(value);
+      if (candidate && !candidates.has(candidate.url)) candidates.set(candidate.url, { ...candidate, record });
+    }
+  }
+  return [...candidates.values()];
+}
+
+function decodeHtml(value) {
+  return String(value ?? "")
+    .replace(/&#(\d+);/g, (_match, code) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([\da-f]+);/gi, (_match, code) => String.fromCodePoint(Number.parseInt(code, 16)))
+    .replace(/&quot;/gi, "\"")
+    .replace(/&apos;|&#39;/gi, "'")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
+function attribute(tag, name) {
+  const match = tag.match(new RegExp(`\\b${name}\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))`, "i"));
+  return decodeHtml(match?.[1] ?? match?.[2] ?? match?.[3] ?? "");
+}
+
+function metaValues(html, key) {
+  const values = [];
+  for (const match of String(html).matchAll(/<meta\b[^>]*>/gi)) {
+    const tag = match[0];
+    if ((attribute(tag, "name") || attribute(tag, "property")).toLowerCase() === key.toLowerCase()) {
+      const value = attribute(tag, "content").trim();
+      if (value) values.push(value);
+    }
+  }
+  return values;
+}
+
+function proceedingsTrack(provider, url, venueRaw) {
+  const evidence = `${url} ${venueRaw}`;
+  if (/\bfindings\b/i.test(evidence)) return "Findings";
+  if (/\bworkshops?\b|\bsrw\b/i.test(evidence)
+    || (provider === "CVF Open Access" && /\d{4}w(?:\/|$)/i.test(new URL(url).pathname))) return "Workshop";
+  if (/\bmain(?:\s+conference)?\b/i.test(evidence)
+    || /\.(?:acl|emnlp|naacl|eacl|aacl)-main\./i.test(url)
+    || provider === "CVF Open Access"
+    || provider === "NeurIPS Proceedings") return "Main";
+  return "";
+}
+
+export function parseOfficialProceedings(html, candidate, paper) {
+  if (typeof html !== "string") throw new TypeError("Malformed official proceedings response.");
+  const title = first(metaValues(html, "citation_title"))
+    ?? first(metaValues(html, "dc.title"))
+    ?? first(metaValues(html, "og:title"));
+  if (!title) throw new TypeError("Official proceedings page has no publication metadata.");
+  const pageAuthors = metaValues(html, "citation_author");
+  const authors = pageAuthors.length ? pageAuthors : candidate.record.authors;
+  const officialVenueRaw = first(metaValues(html, "citation_conference_title"))
+    ?? first(metaValues(html, "citation_journal_title"))
+    ?? "";
+  const venueRaw = officialVenueRaw || candidate.record.venueRaw || "";
+  const publicationDate = first(metaValues(html, "citation_publication_date"))
+    ?? first(metaValues(html, "citation_date"));
+  const trackRaw = proceedingsTrack(candidate.provider, candidate.url, officialVenueRaw);
+  return matchFields(paper, {
+    source: "proceedings",
+    provider: candidate.provider,
+    sourceId: candidate.url,
+    sourceUrl: candidate.url,
+    title,
+    authors,
+    venueRaw,
+    decisionRaw: "Published",
+    trackRaw,
+    trackEvidence: trackRaw ? "official" : "none",
+    presentationRaw: "",
+    year: yearFrom(publicationDate, venueRaw, candidate.record.year),
+    publicationDoi: first(metaValues(html, "citation_doi")) ?? candidate.record.publicationDoi ?? "",
+    arxivId: "",
+    evidenceType: "official-proceedings",
+    identityEvidence: pageAuthors.length ? "official-metadata" : "dblp-publication-link",
+    raw: { provider: candidate.provider, publicationUrl: candidate.url },
   });
 }
 
@@ -131,7 +244,7 @@ function openReviewRecord(submission, paper, version, decisionNote = null) {
     ),
     year: yearFrom(venueRaw, contentValue(submission, "venueid"), submission.invitation, submission.invitations)
       ?? (submission.cdate ? new Date(submission.cdate).getUTCFullYear() : null),
-    doi: String(contentValue(submission, "doi") ?? ""),
+    publicationDoi: String(contentValue(submission, "doi") ?? ""),
     arxivId: String(contentValue(submission, "arxiv_id") ?? contentValue(submission, "arxiv") ?? ""),
     evidenceType: decisionNote ? "decision" : "submission",
     raw: decisionNote ? { submission, decision: decisionNote } : submission,

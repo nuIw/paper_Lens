@@ -12,13 +12,21 @@ const paper = {
   pdfUrl: "https://arxiv.org/pdf/1706.03762",
 };
 
-function response(payload, status = 200, headers = {}) {
-  return {
+function response(payload, status = 200, headers = {}, metadata = {}) {
+  const result = {
     ok: status >= 200 && status < 300,
     status,
+    redirected: metadata.redirected ?? false,
+    url: metadata.url ?? "",
     headers: { get: (name) => headers[name.toLowerCase()] ?? null },
-    json: async () => payload,
+    json: async () => {
+      if (typeof payload === "string") throw new SyntaxError("Not JSON");
+      return payload;
+    },
+    text: async () => typeof payload === "string" ? payload : JSON.stringify(payload),
   };
+  result.clone = () => response(payload, status, headers, metadata);
+  return result;
 }
 
 function memoryStorage() {
@@ -124,6 +132,49 @@ test("GitHub is queried only by the explicit search message", async () => {
   assert.match(calls[0], /^https:\/\/api\.github\.com\/search\/repositories/);
 });
 
+test("GitHub click-search reuses a one-hour session cache", async () => {
+  let calls = 0;
+  const storageSession = memoryStorage();
+  const service = createService({
+    fetchImpl: async () => {
+      calls += 1;
+      return response({ items: [] }, 200, { "x-ratelimit-remaining": "59" });
+    },
+    storageLocal: memoryStorage(),
+    storageSession,
+    downloads: { download: async () => 1 },
+    now: () => 1000,
+  });
+  const first = await service.handleMessage({ type: "SEARCH_GITHUB", paper });
+  const second = await service.handleMessage({ type: "SEARCH_GITHUB", paper });
+  assert.equal(first.data.fromCache, false);
+  assert.equal(second.data.fromCache, true);
+  assert.equal(calls, 1);
+});
+
+test("concurrent GitHub clicks share one in-flight API request", async () => {
+  let calls = 0;
+  let release;
+  const pending = new Promise((resolve) => { release = resolve; });
+  const service = createService({
+    fetchImpl: async () => {
+      calls += 1;
+      await pending;
+      return response({ items: [] }, 200, { "x-ratelimit-remaining": "59" });
+    },
+    storageLocal: memoryStorage(),
+    storageSession: memoryStorage(),
+    downloads: { download: async () => 1 },
+    now: () => 1000,
+  });
+  const first = service.handleMessage({ type: "SEARCH_GITHUB", paper });
+  const second = service.handleMessage({ type: "SEARCH_GITHUB", paper });
+  release();
+  const results = await Promise.all([first, second]);
+  assert.equal(results.every((result) => result.ok), true);
+  assert.equal(calls, 1);
+});
+
 test("download uses the validated filename and Save As setting", async () => {
   const downloadCalls = [];
   const service = createService({
@@ -135,12 +186,12 @@ test("download uses the validated filename and Save As setting", async () => {
   const result = await service.handleMessage({
     type: "DOWNLOAD_PDF",
     pdfUrl: paper.pdfUrl,
-    filename: "Attention__1706.03762.pdf",
+    filename: "Attention_1706.03762.pdf",
     saveAs: true,
   });
   assert.deepEqual(downloadCalls, [{
     url: paper.pdfUrl,
-    filename: "Attention__1706.03762.pdf",
+    filename: "Attention_1706.03762.pdf",
     saveAs: true,
     conflictAction: "uniquify",
   }]);
@@ -231,7 +282,6 @@ test("forum lookup failures remain visible as an OpenReview warning", async () =
 });
 
 test("OpenReview challenge failures expose an actionable verification link", async () => {
-  const challengeUrl = "https://openreview.net/challenge?redirect=%2Fforum%3Fid%3Dforum";
   const fetchImpl = async (url) => {
     if (url.startsWith("https://dblp.org/")) return response({ result: { hits: { hit: [] } } });
     if (url.includes("/notes/search")) return response({ notes: [{
@@ -246,7 +296,7 @@ test("OpenReview challenge failures expose an actionable verification link", asy
     if (url.includes("forum=forum")) return response({
       name: "ChallengeRequiredError",
       message: "Challenge verification required",
-      details: { challengeUrl },
+      details: { challengeUrl: "https://openreview.net.evil.test/challenge" },
     }, 403);
     return response({ notes: [] });
   };
@@ -261,18 +311,75 @@ test("OpenReview challenge failures expose an actionable verification link", asy
   assert.equal(result.ok, true);
   assert.equal(result.data.sources.openreview.status, "success");
   assert.match(result.data.sources.openreview.warning, /Challenge verification required/);
-  assert.equal(result.data.sources.openreview.manualUrl, challengeUrl);
+  assert.equal(result.data.sources.openreview.manualUrl, "https://openreview.net/forum?id=forum");
 });
 
-test("OpenReview top-level challenge survives the v2-v1 fallback", async () => {
+test("OpenReview HTML challenge is a manual-verification state", async () => {
   const fetchImpl = async (url) => {
     if (url.startsWith("https://dblp.org/")) return response({ result: { hits: { hit: [] } } });
-    if (url.includes("api2.openreview.net/notes/search")) return response({ notes: [] });
-    return response({
+    return response("<html><title>Challenge verification</title></html>");
+  };
+  const service = createService({
+    fetchImpl,
+    storageLocal: memoryStorage(),
+    downloads: { download: async () => 1 },
+    now: () => 1000,
+  });
+  const result = await service.handleMessage({ type: "ANALYZE_PAPER", paper });
+  assert.equal(result.data.sources.openreview.status, "error");
+  assert.match(result.data.sources.openreview.error, /interactive verification/);
+  assert.match(result.data.sources.openreview.manualUrl, /^https:\/\/openreview\.net\/search\?/);
+});
+
+test("official proceedings verify track only after a strong DBLP candidate", async () => {
+  const officialUrl = "https://aclanthology.org/2025.acl-main.1/";
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(url);
+    if (url.startsWith("https://dblp.org/")) return response({ result: { hits: { hit: [{ info: {
+      title: paper.title,
+      authors: { author: { text: paper.authors[0] } },
+      venue: "ACL",
+      year: "2025",
+      doi: "10.1/example",
+      ee: ["https://doi.org/10.1/example", officialUrl],
+    } }] } } });
+    if (url === officialUrl) return response(`
+      <meta name="citation_title" content="${paper.title}">
+      <meta name="citation_author" content="${paper.authors[0]}">
+      <meta name="citation_conference_title" content="ACL 2025 Main Conference">
+      <meta name="citation_doi" content="10.1/example">
+    `);
+    return response({ notes: [] });
+  };
+  const service = createService({
+    fetchImpl,
+    storageLocal: memoryStorage(),
+    downloads: { download: async () => 1 },
+    now: () => 1000,
+  });
+  const result = await service.handleMessage({ type: "ANALYZE_PAPER", paper });
+  assert.equal(result.data.sources.proceedings.status, "success");
+  assert.equal(result.data.representative.source, "proceedings");
+  assert.deepEqual(result.data.verificationAxes, {
+    identity: "probable",
+    decision: "verified",
+    track: "verified",
+  });
+  assert.equal(calls.filter((url) => url === officialUrl).length, 1);
+});
+
+test("OpenReview top-level challenge stops before the v1 fallback", async () => {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(url);
+    if (url.startsWith("https://dblp.org/")) return response({ result: { hits: { hit: [] } } });
+    if (url.includes("api2.openreview.net/notes/search")) return response({
       name: "ChallengeRequiredError",
       message: "Challenge verification required",
       details: { challengeUrl: "https://api.openreview.net/untrusted-value" },
     }, 403);
+    return response({ notes: [] });
   };
   const service = createService({
     fetchImpl,
@@ -286,11 +393,28 @@ test("OpenReview top-level challenge survives the v2-v1 fallback", async () => {
   assert.equal(result.data.sources.openreview.status, "error");
   assert.match(result.data.sources.openreview.error, /Challenge verification required/);
   const manualUrl = new URL(result.data.sources.openreview.manualUrl);
-  assert.equal(manualUrl.origin + manualUrl.pathname, "https://openreview.net/challenge");
-  assert.equal(
-    manualUrl.searchParams.get("redirect"),
-    "/search?term=Attention+Is+All+You+Need&content=title&group=all&source=forum",
-  );
+  assert.equal(manualUrl.origin + manualUrl.pathname, "https://openreview.net/search");
+  assert.equal(manualUrl.searchParams.get("term"), paper.title);
+  assert.equal(calls.some((url) => url.startsWith("https://api.openreview.net/")), false);
+});
+
+test("OpenReview rate limiting does not trigger an extra legacy request", async () => {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(url);
+    if (url.startsWith("https://dblp.org/")) return response({ result: { hits: { hit: [] } } });
+    return response({ message: "Too many requests" }, 429);
+  };
+  const service = createService({
+    fetchImpl,
+    storageLocal: memoryStorage(),
+    downloads: { download: async () => 1 },
+    now: () => 1000,
+  });
+  const result = await service.handleMessage({ type: "ANALYZE_PAPER", paper });
+  assert.match(result.data.sources.openreview.error, /Too many requests.*429/);
+  assert.match(result.data.sources.openreview.manualUrl, /^https:\/\/openreview\.net\/search\?/);
+  assert.equal(calls.some((url) => url.startsWith("https://api.openreview.net/")), false);
 });
 
 test("OpenReview ignores an API-supplied challenge URL and builds its own", async () => {
@@ -323,11 +447,11 @@ test("OpenReview ignores an API-supplied challenge URL and builds its own", asyn
   assert.match(result.data.sources.openreview.warning, /Challenge verification required/);
   assert.equal(
     result.data.sources.openreview.manualUrl,
-    "https://openreview.net/challenge?redirect=%2Fforum%3Fid%3Dforum",
+    "https://openreview.net/forum?id=forum",
   );
 });
 
-test("every strong OpenReview search result receives a forum lookup", async () => {
+test("only the two strongest OpenReview search results receive forum lookups", async () => {
   const forums = new Set();
   const fetchImpl = async (url) => {
     if (url.startsWith("https://dblp.org/")) return response({ result: { hits: { hit: [] } } });
@@ -352,7 +476,7 @@ test("every strong OpenReview search result receives a forum lookup", async () =
   });
   const result = await service.handleMessage({ type: "ANALYZE_PAPER", paper });
   assert.equal(result.ok, true);
-  assert.deepEqual([...forums].sort(), ["forum-0", "forum-1", "forum-2", "forum-3"]);
+  assert.deepEqual([...forums].sort(), ["forum-0", "forum-1"]);
 });
 
 test("cache write failure does not discard successful network analysis", async () => {
@@ -379,4 +503,21 @@ test("cache write failure does not discard successful network analysis", async (
   assert.equal(result.ok, true);
   assert.equal(result.data.representative.source, "dblp");
   assert.match(result.data.cacheWarning, /storage unavailable/);
+});
+
+test("partial source failures use the short cache expiry", async () => {
+  const storage = memoryStorage();
+  const service = createService({
+    fetchImpl: async (url) => {
+      if (url.startsWith("https://dblp.org/")) throw new Error("offline");
+      return response({ notes: [] });
+    },
+    storageLocal: storage,
+    downloads: { download: async () => 1 },
+    now: () => 1000,
+  });
+  const result = await service.handleMessage({ type: "ANALYZE_PAPER", paper });
+  const [entry] = storage.values.values();
+  assert.equal(result.ok, true);
+  assert.equal(entry.expiresAt - entry.savedAt, 10 * 60 * 1000);
 });

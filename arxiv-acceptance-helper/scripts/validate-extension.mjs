@@ -24,6 +24,10 @@ const allowedHosts = new Set([
   "https://dblp.org/*",
   "https://api2.openreview.net/*",
   "https://api.openreview.net/*",
+  "https://openaccess.thecvf.com/*",
+  "https://aclanthology.org/*",
+  "https://proceedings.mlr.press/*",
+  "https://proceedings.neurips.cc/*",
   "https://api.github.com/*",
 ]);
 if (manifest.host_permissions.some((host) => !allowedHosts.has(host))) {

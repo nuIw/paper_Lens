@@ -2,8 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildCacheEntry,
+  CACHE_ERROR_TTL_MS,
+  CACHE_SCHEMA_VERSION,
   CACHE_TTL_MS,
   cacheKey,
+  githubCacheKey,
   isAllowedPdfUrl,
   isFreshCache,
   isTrustedSender,
@@ -14,7 +18,7 @@ const paper = {
   arxivId: "1706.03762",
   title: "Attention Is All You Need",
   authors: ["Ashish Vaswani"],
-  doi: "10.5555/example",
+  publicationDoi: "10.5555/example",
   year: 2017,
   pageUrl: "https://arxiv.org/abs/1706.03762",
   pdfUrl: "https://arxiv.org/pdf/1706.03762",
@@ -27,7 +31,7 @@ test("message validation accepts only the four fixed message contracts", () => {
   assert.equal(validateMessage({
     type: "DOWNLOAD_PDF",
     pdfUrl: paper.pdfUrl,
-    filename: "Attention__1706.03762.pdf",
+    filename: "Attention_1706.03762.pdf",
     saveAs: true,
   }).ok, true);
 });
@@ -75,17 +79,23 @@ test("download validation rejects empty or path-like filenames", () => {
   }).ok, false);
 });
 
-test("24-hour cache expires exactly at the boundary", () => {
+test("cache validates schema, paper fingerprints, and exact expiry", () => {
   const now = Date.parse("2026-08-24T00:00:00Z");
+  const entry = buildCacheEntry(paper, { result: true }, now - CACHE_TTL_MS + 1);
+  const boundary = buildCacheEntry(paper, {}, now - CACHE_TTL_MS);
+  assert.equal(CACHE_SCHEMA_VERSION, 3);
   assert.equal(CACHE_TTL_MS, 86_400_000);
-  assert.equal(isFreshCache({ savedAt: now - CACHE_TTL_MS + 1 }, now), true);
-  assert.equal(isFreshCache({ savedAt: now - CACHE_TTL_MS }, now), false);
-  assert.equal(isFreshCache({ savedAt: "bad" }, now), false);
+  assert.equal(CACHE_ERROR_TTL_MS, 600_000);
+  assert.equal(isFreshCache(entry, paper, now), true);
+  assert.equal(isFreshCache(boundary, paper, now), false);
+  assert.equal(isFreshCache(entry, { ...paper, title: "Changed" }, now), false);
+  assert.equal(isFreshCache({ ...entry, schemaVersion: 2 }, paper, now), false);
 });
 
-test("cache keys canonicalize versions but preserve legacy categories", () => {
-  assert.equal(cacheKey("1706.03762v5"), "analysis:v2:1706.03762");
-  assert.equal(cacheKey("hep-th/9901001v2"), "analysis:v2:hep-th/9901001");
+test("cache keys canonicalize versions and separate analysis from GitHub", () => {
+  assert.equal(cacheKey("1706.03762v5"), "analysis:v3:1706.03762");
+  assert.equal(cacheKey("hep-th/9901001v2"), "analysis:v3:hep-th/9901001");
+  assert.equal(githubCacheKey("1706.03762v5"), "github:v1:1706.03762");
 });
 
 test("service messages are accepted only from this extension on an arXiv abstract tab", () => {

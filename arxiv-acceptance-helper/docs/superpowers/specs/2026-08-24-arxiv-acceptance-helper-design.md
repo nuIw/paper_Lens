@@ -11,7 +11,8 @@ Build a backend-free Chrome Manifest V3 extension for daily use on
 arXiv's **Export BibTeX Citation** control. Opening the button reveals an
 inline panel that:
 
-- finds and verifies conference/publication records from DBLP and OpenReview;
+- finds publication candidates in DBLP/OpenReview and verifies eligible records
+  against official proceedings pages;
 - retains every historical submission record instead of collapsing history;
 - exposes the evidence and confidence behind the representative result;
 - finds code and project links in the arXiv page and paper PDF;
@@ -87,6 +88,7 @@ arXiv abstract page
                     └─ MV3 service worker
                          ├─ DBLP collector
                          ├─ OpenReview v2/v1 collector
+                         ├─ official proceedings follow-up
                          ├─ evidence resolver
                          ├─ on-demand GitHub repository search
                          ├─ chrome.storage cache/settings
@@ -103,9 +105,11 @@ remain browser-independent and are exercised with Node's built-in test runner.
 
 ### arXiv
 
-Extract title, authors, arXiv ID, DOI, comments, abstract, abstract-page URL,
-and the actual PDF anchor URL from the live page. Prefer page anchors over URL
-reconstruction so old-style and versioned arXiv identifiers work.
+Extract title, authors, arXiv ID, comments, abstract, abstract-page URL, and the
+actual PDF anchor URL from the live page. Keep arXiv's DataCite DOI
+(`10.48550/arXiv...`) separate from a related publication DOI. Prefer page
+anchors over URL reconstruction so old-style and versioned arXiv identifiers
+work.
 
 ### DBLP
 
@@ -119,6 +123,15 @@ prefix-token search can otherwise rank title lookalikes above the exact paper
 within the ten-result window. The author is retrieval context only; the normal
 title/author/identifier scorer still decides whether a hit is a match.
 
+### Official proceedings
+
+After a strong DBLP match, follow only publication URLs that DBLP already
+provides on CVF Open Access, ACL Anthology, PMLR, or NeurIPS Proceedings. The
+official page can verify publication and can verify Main/Findings/Workshop only
+when its metadata or official collection URL makes the track explicit. A DBLP
+venue string is never reused as official track evidence. Do not run a broad
+proceedings search or maintain a conference allowlist.
+
 ### OpenReview
 
 Search API v2 at `https://api2.openreview.net`, score submission candidates,
@@ -126,12 +139,12 @@ and retrieve forum replies for strong candidates so Decision notes are not
 missed. Support both v2 `{ value }` content fields and v1 scalar content fields.
 When v2 has no usable candidate, query `https://api.openreview.net` as the
 legacy fallback. Preserve unknown Invitation-defined fields in the raw record.
-If an API response requires OpenReview's interactive challenge, preserve the
-error as incomplete verification. Ignore any API-supplied link and construct a
-fixed `https://openreview.net/challenge` link that redirects to the known forum
-or a title search. Never turn a challenge response into an acceptance claim,
-describe legacy verification as fully automatic, or promise that completing
-the web challenge will restore the extension's cross-origin API request.
+Expand only the two strongest candidates to avoid redundant forum requests. If
+an API response requires OpenReview's interactive challenge or is rate-limited,
+preserve the source as incomplete and link directly to the known forum or a
+title search for manual verification. Do not retry the legacy API after a v2
+challenge/rate limit, bypass the challenge, trust an API-supplied URL, or turn
+the failure into an acceptance claim.
 
 ### GitHub
 
@@ -140,7 +153,9 @@ button queries the public repository search endpoint for a small title-based
 candidate set. Results appear under a `Search candidates` heading with
 repository owner, description, URL, stars, and update date. Rate-limit or
 network errors retain a normal GitHub web-search link as the manual fallback.
-No candidate is labeled official without a direct paper-provided link.
+No candidate is labeled official without a direct paper-provided link. Reuse a
+successful result for one hour in `chrome.storage.session` and deduplicate an
+in-flight request for the same paper.
 
 ### PDF links
 
@@ -194,8 +209,14 @@ Workshop record remains in history. Workshop-only papers remain Workshop.
 
 ### Verification labels
 
-- **Verified:** exact identifier evidence, or an official OpenReview Decision
-  attached to a strongly matched submission.
+Identity, Decision, and Track have separate verification states. Exact arXiv
+ID/publication DOI can verify identity; an official OpenReview Decision or
+official proceedings page can verify a decision; only explicit official track
+evidence can verify Track. DBLP publication metadata alone cannot verify
+Decision or Track.
+
+- **Verified:** at least one decision-verifying official record represents the
+  paper; inspect the three axes to see what that record actually verifies.
 - **Probable:** one authoritative metadata source with strong title/author
   identity but no exact identifier.
 - **Metadata only:** a source exposes venue/decision text that cannot be
@@ -209,12 +230,12 @@ Workshop record remains in history. Workshop-only papers remain Workshop.
 Default filename format:
 
 ```text
-<title text before the first colon, or the full title>__<arXiv ID>.pdf
+<title text before the first colon, or the full title>_<arXiv ID>.pdf
 ```
 
 The filename is editable. A native select offers exactly four modes:
 
-- alias plus arXiv ID (default);
+- short title plus arXiv ID (default);
 - full title plus arXiv ID;
 - arXiv ID only; and
 - custom/manual editing.
@@ -227,13 +248,15 @@ checkbox in `chrome.storage.sync`.
 
 ## Cache, Privacy, and Security
 
-- Cache normalized analysis results in `chrome.storage.local` for 24 hours,
-  keyed by canonical arXiv ID and schema version.
+- Cache normalized analysis results in `chrome.storage.local` with schema,
+  arXiv ID, normalized title/author fingerprints, `savedAt`, and `expiresAt`.
+  Complete results live for 24 hours and partial source failures for 10 minutes.
 - A visible refresh control bypasses and replaces one paper's cache entry.
-- Persist no PDF bytes, browsing history, GitHub search responses, API tokens,
-  or telemetry.
+- Persist no PDF bytes, browsing history, API tokens, or telemetry. GitHub
+  candidates use a one-hour, browser-session-only cache.
 - Request only `storage` and `downloads` Chrome permissions.
-- Restrict host permissions to arXiv, DBLP, OpenReview v2/v1, and GitHub API.
+- Restrict host permissions to arXiv, DBLP, OpenReview v2/v1, four official
+  proceedings hosts, and GitHub API.
 - Validate all incoming messages, paper metadata, arXiv download URLs, and
   filename strings at the service-worker boundary.
 - Render remote strings with DOM `textContent`, never `innerHTML`.

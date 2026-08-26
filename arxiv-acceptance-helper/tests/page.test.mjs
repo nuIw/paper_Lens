@@ -113,10 +113,12 @@ test("panel view model exposes accepted venue, explicit track, and presentation"
     representative: record,
     records: [record],
     verification: "verified",
+    verificationAxes: { identity: "probable", decision: "verified", track: "verified" },
     sources: { dblp: { status: "error", error: "offline", count: 0 } },
   });
   assert.equal(view.headline, "NeurIPS 2025 · Accepted · Main · Poster");
   assert.equal(view.verificationLabel, "Verified");
+  assert.equal(view.verificationAxesLabel, "Identity Probable · Decision Verified · Track Verified");
 });
 
 test("venue formatting does not repeat an existing year", () => {

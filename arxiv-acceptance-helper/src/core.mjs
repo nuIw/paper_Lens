@@ -53,7 +53,9 @@ function tokenSimilarity(left, right) {
 
 function authorKeys(authors) {
   return new Set(normalizeAuthors(authors).map((author) => {
-    const parts = normalizeText(author).split(" ").filter(Boolean);
+    const parts = normalizeText(author.includes(",") ? author.split(",", 1)[0] : author)
+      .split(" ")
+      .filter(Boolean);
     return parts.at(-1) ?? "";
   }).filter(Boolean));
 }
@@ -66,8 +68,8 @@ function authorOverlap(left, right) {
 }
 
 export function scorePaperMatch(paper, record) {
-  const paperDoi = normalizeDoi(paper?.doi);
-  const recordDoi = normalizeDoi(record?.doi);
+  const paperDoi = normalizeDoi(paper?.publicationDoi ?? paper?.doi);
+  const recordDoi = normalizeDoi(record?.publicationDoi ?? record?.doi);
   const paperArxiv = normalizeArxivId(paper?.arxivId);
   const recordArxiv = normalizeArxivId(record?.arxivId);
 
@@ -112,20 +114,39 @@ export function normalizePresentation(raw) {
   return "unknown";
 }
 
-function confidenceFor(record) {
+function verificationAxesFor(record) {
   const score = Number(record.matchScore ?? 1);
-  if (score < AUTO_MATCH_THRESHOLD) return "candidate";
-  if (record.matchKind === "identifier") return "verified";
-  if (record.source === "openreview" && record.evidenceType === "decision" && score >= AUTO_MATCH_THRESHOLD) {
-    return "verified";
-  }
-  return record.decision === "unknown" ? "metadata_only" : "probable";
+  const identity = score < AUTO_MATCH_THRESHOLD
+    ? "candidate"
+    : record.matchKind === "identifier" ? "verified" : "probable";
+  const decision = identity === "candidate"
+    ? "unverified"
+    : record.source === "proceedings" || (record.source === "openreview" && record.evidenceType === "decision")
+      ? "verified"
+      : record.decision === "unknown" ? "unverified" : "metadata_only";
+  const track = identity === "candidate" || ["unknown", "other"].includes(record.track)
+    ? "unverified"
+    : record.source === "proceedings" && record.trackEvidence === "official"
+      ? "verified"
+      : record.source === "openreview" && record.trackRaw ? "probable" : "metadata_only";
+  return { identity, decision, track };
+}
+
+function confidenceFor(record) {
+  const axes = verificationAxesFor(record);
+  if (axes.identity === "candidate") return "candidate";
+  if (axes.decision === "verified") return "verified";
+  if (record.decision === "unknown") return "metadata_only";
+  return "probable";
 }
 
 function recordRank(record) {
   if (record.confidence === "candidate") return -1;
   if (record.decision === "accepted") {
-    return { main: 800, findings: 700, workshop: 600, other: 500, unknown: 500 }[record.track];
+    const sourceBonus = record.source === "proceedings"
+      ? 20
+      : record.source === "openreview" && record.evidenceType === "decision" ? 10 : 0;
+    return { main: 800, findings: 700, workshop: 600, other: 500, unknown: 500 }[record.track] + sourceBonus;
   }
   return { under_review: 400, preprint: 300, unknown: 250, rejected: 200, withdrawn: 100 }[record.decision];
 }
@@ -152,7 +173,10 @@ export function resolveRecords(records = []) {
     const decision = normalizeDecision(record.decisionRaw ?? record.venueRaw);
     const track = normalizeTrack(record.trackRaw);
     const presentation = normalizePresentation(record.presentationRaw ?? record.decisionRaw);
-    return { ...record, decision, track, presentation, confidence: confidenceFor({ ...record, decision }) };
+    const resolved = { ...record, decision, track, presentation };
+    resolved.verification = verificationAxesFor(resolved);
+    resolved.confidence = confidenceFor(resolved);
+    return resolved;
   });
 
   const representative = normalized
@@ -162,7 +186,16 @@ export function resolveRecords(records = []) {
     ? "conflicting"
     : representative?.confidence ?? (normalized.length ? "metadata_only" : "unverified");
 
-  return { representative, records: normalized, verification };
+  return {
+    representative,
+    records: normalized,
+    verification,
+    verificationAxes: representative?.verification ?? {
+      identity: normalized.length ? "candidate" : "unverified",
+      decision: verification === "conflicting" ? "conflicting" : "unverified",
+      track: "unverified",
+    },
+  };
 }
 
 export function sanitizeFilename(value) {
@@ -195,5 +228,11 @@ export function buildFilename(paper, mode = "alias", custom = "") {
   if (mode === "custom" && String(custom).trim()) return sanitizeFilename(custom);
   if (mode === "id") return sanitizeFilename(id);
   const selectedTitle = mode === "full" ? title : (title.split(":", 1)[0].trim() || title);
-  return sanitizeFilename(`${selectedTitle}__${id}`);
+  const safeId = sanitizeFilename(id).slice(0, -4);
+  let safeTitle = sanitizeFilename(selectedTitle).slice(0, -4).replace(/_+$/g, "") || "paper";
+  const encoder = new TextEncoder();
+  while (encoder.encode(`${safeTitle}_${safeId}.pdf`).length > 180) {
+    safeTitle = Array.from(safeTitle).slice(0, -1).join("").replace(/[. _]+$/g, "");
+  }
+  return `${safeTitle}_${safeId}.pdf`;
 }

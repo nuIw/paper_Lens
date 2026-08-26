@@ -1,6 +1,9 @@
-import { sanitizeFilename } from "./core.mjs";
+import { normalizeAuthors, normalizeText, sanitizeFilename } from "./core.mjs";
 
+export const CACHE_SCHEMA_VERSION = 3;
 export const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+export const CACHE_ERROR_TTL_MS = 10 * 60 * 1000;
+export const GITHUB_CACHE_TTL_MS = 60 * 60 * 1000;
 
 const PAPER_MESSAGES = new Set(["ANALYZE_PAPER", "REFRESH_PAPER", "SEARCH_GITHUB"]);
 const ARXIV_ID = /^(?:\d{4}\.\d{4,5}|[a-zA-Z.-]+\/\d{7})(?:v\d+)?$/;
@@ -10,12 +13,43 @@ export function canonicalArxivId(value) {
 }
 
 export function cacheKey(arxivId) {
-  return `analysis:v2:${canonicalArxivId(arxivId)}`;
+  return `analysis:v3:${canonicalArxivId(arxivId)}`;
 }
 
-export function isFreshCache(entry, now = Date.now()) {
+export function githubCacheKey(arxivId) {
+  return `github:v1:${canonicalArxivId(arxivId)}`;
+}
+
+function paperFingerprints(paper) {
+  return {
+    titleFingerprint: normalizeText(paper?.title),
+    authorsFingerprint: normalizeAuthors(paper?.authors).map(normalizeText).join("|"),
+  };
+}
+
+export function buildCacheEntry(paper, data, savedAt, ttlMs = CACHE_TTL_MS) {
+  return {
+    schemaVersion: CACHE_SCHEMA_VERSION,
+    arxivId: canonicalArxivId(paper?.arxivId),
+    ...paperFingerprints(paper),
+    savedAt,
+    expiresAt: savedAt + ttlMs,
+    data,
+  };
+}
+
+export function isFreshCache(entry, paper, now = Date.now()) {
+  const expected = paperFingerprints(paper);
   const savedAt = Number(entry?.savedAt);
-  return Number.isFinite(savedAt) && savedAt <= now && now - savedAt < CACHE_TTL_MS;
+  const expiresAt = Number(entry?.expiresAt);
+  return entry?.schemaVersion === CACHE_SCHEMA_VERSION
+    && entry?.arxivId === canonicalArxivId(paper?.arxivId)
+    && entry?.titleFingerprint === expected.titleFingerprint
+    && entry?.authorsFingerprint === expected.authorsFingerprint
+    && Number.isFinite(savedAt)
+    && Number.isFinite(expiresAt)
+    && savedAt <= now
+    && now < expiresAt;
 }
 
 export function isAllowedPdfUrl(value) {
