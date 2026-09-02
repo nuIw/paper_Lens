@@ -269,7 +269,7 @@ export function placePanelHosts(doc, summaryHost, detailsHost) {
   const detailsAnchor = bookmark ?? citation?.closest?.(".extra-ref-cite") ?? citation?.parentElement ?? citation;
   if (!title || !detailsAnchor) return false;
   title.insertAdjacentElement("afterend", summaryHost);
-  detailsAnchor.insertAdjacentElement(bookmark ? "beforebegin" : "afterend", detailsHost);
+  detailsAnchor.insertAdjacentElement("afterend", detailsHost);
   return true;
 }
 
@@ -659,12 +659,14 @@ async function mount() {
       header.append(element("p", "ah-error", state.analysisError));
     } else {
       const view = panelViewModel(state.analysis ?? {});
-      header.append(element("div", "ah-headline", view.headline));
-      header.append(element(
+      const titleRow = element("div", "ah-title-row");
+      titleRow.append(element("div", "ah-headline", view.headline));
+      titleRow.append(element(
         "span",
         `ah-badge ah-badge--${view.verification}`,
         view.verificationLabel,
       ));
+      header.append(titleRow);
       header.append(element("div", "ah-verification-axes", view.verificationAxesLabel));
       if (view.fallbackNotice) header.append(element("p", "ah-muted", view.fallbackNotice));
       if (state.analysis?.staleEvidenceWarning) {

@@ -80,9 +80,16 @@ summary:focus-visible {
 }
 
 .ah-headline {
-  flex: 1 1 20rem;
   font-size: 1.02rem;
   font-weight: 750;
+}
+
+.ah-title-row {
+  display: flex;
+  flex: 1 0 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .ah-verification-axes {
