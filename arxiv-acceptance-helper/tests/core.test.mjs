@@ -8,6 +8,8 @@ import {
   normalizePresentation,
   normalizeText,
   normalizeTrack,
+  parseArxivCommentAcceptance,
+  parseArxivCommentVenueHint,
   resolveRecords,
   sanitizeFilename,
   scorePaperMatch,
@@ -34,13 +36,13 @@ test("matches family-name-first proceedings authors", () => {
 });
 
 test("an exact DOI is a verified identity match", () => {
-  assert.deepEqual(
-    scorePaperMatch(
-      { title: "Old title", authors: ["Alice Kim"], doi: "10.1000/XYZ" },
-      { title: "New title", authors: ["A. Kim"], doi: "https://doi.org/10.1000/xyz" },
-    ),
-    { score: 1, kind: "identifier" },
+  const match = scorePaperMatch(
+    { title: "Old title", authors: ["Alice Kim"], doi: "10.1000/XYZ" },
+    { title: "New title", authors: ["A. Kim"], doi: "https://doi.org/10.1000/xyz" },
   );
+  assert.equal(match.score, 1);
+  assert.equal(match.kind, "identifier");
+  assert.equal(match.evidence.identifier, "publication DOI");
 });
 
 test("different DOI punctuation cannot collapse into an identifier match", () => {
@@ -77,6 +79,63 @@ test("a title-only weak candidate is not auto-merged", () => {
   assert.ok(match.score < 0.82);
 });
 
+test("a shared surname with conflicting given names is not author evidence", () => {
+  const match = scorePaperMatch(
+    { title: "A Common Paper Title", authors: ["Alice Kim"], year: 2025 },
+    { title: "A Common Paper Title", authors: ["Andrew Kim"], year: 2025 },
+  );
+  assert.equal(match.evidence.authors.matched, 0);
+  assert.ok(match.score < 0.82);
+});
+
+test("initial-compatible names are strong but explicitly labeled author evidence", () => {
+  const match = scorePaperMatch(
+    { title: "Paper", authors: ["Ashish Vaswani"], year: 2025 },
+    { title: "Paper", authors: ["A. Vaswani"], year: 2025 },
+  );
+  assert.equal(match.evidence.authors.initials, 1);
+  assert.equal(match.evidence.authors.exact, 0);
+  assert.ok(match.score >= 0.9);
+});
+
+test("a changed subtitle and later publication year can remain a strong metadata match", () => {
+  const match = scorePaperMatch(
+    { title: "Learning Robust Representations", authors: ["Alice Kim"], year: 2021 },
+    { title: "Learning Robust Representations for Vision", authors: ["Alice Kim"], year: 2024 },
+  );
+  assert.equal(match.evidence.year.distance, 3);
+  assert.ok(match.score >= 0.82);
+});
+
+test("conflicting arXiv identifiers cannot be auto-matched by similar metadata", () => {
+  const match = scorePaperMatch(
+    { arxivId: "2501.00001", title: "Paper", authors: ["Alice Kim"], year: 2025 },
+    { arxivId: "2501.00002", title: "Paper", authors: ["Alice Kim"], year: 2025 },
+  );
+  assert.equal(match.evidence.identifierConflict, "arxiv");
+  assert.ok(match.score < 0.82);
+});
+
+test("paper matching can use the viewed arXiv version as a metadata alias", () => {
+  const match = scorePaperMatch({
+    title: "A Completely Renamed Paper",
+    authors: ["Alice Kim", "Bob Lee"],
+    year: 2025,
+    metadataAliases: [{
+      title: "Original Submission Title",
+      authors: ["Alice Kim"],
+      year: 2024,
+      version: 1,
+    }],
+  }, {
+    title: "Original Submission Title",
+    authors: ["Alice Kim"],
+    year: 2024,
+  });
+  assert.ok(match.score >= 0.82);
+  assert.equal(match.evidence.metadataVersion, 1);
+});
+
 test("normalizes generic decisions without a venue allowlist", () => {
   assert.equal(normalizeDecision("Accept (Poster)"), "accepted");
   assert.equal(normalizeDecision("Desk Rejected"), "rejected");
@@ -97,6 +156,59 @@ test("normalizes only explicit tracks and presentation values", () => {
   assert.equal(normalizePresentation("Accept (Spotlight)"), "spotlight");
   assert.equal(normalizePresentation("Oral presentation"), "oral");
   assert.equal(normalizePresentation("Poster"), "poster");
+});
+
+test("arXiv comments create only explicit author-reported acceptance hints", () => {
+  assert.deepEqual(parseArxivCommentAcceptance("Accepted at ICLR 2026 as a poster. 12 pages"), {
+    decision: "accepted",
+    venueRaw: "ICLR 2026",
+    year: 2026,
+    track: "unknown",
+    presentation: "poster",
+    commentRaw: "Accepted at ICLR 2026 as a poster. 12 pages",
+  });
+  assert.equal(parseArxivCommentAcceptance("Submitted to ICLR 2026"), null);
+  assert.equal(parseArxivCommentAcceptance("ICLR 2026 submission"), null);
+  assert.equal(parseArxivCommentAcceptance("ICLR 2026 under review"), null);
+  assert.equal(parseArxivCommentAcceptance("Extended NeurIPS submission"), null);
+  assert.equal(
+    parseArxivCommentAcceptance("Accepted at ICLR 2026; originally submitted in 2025").venueRaw,
+    "ICLR 2026",
+  );
+  assert.deepEqual(
+    parseArxivCommentAcceptance("The 14th International Conference on Learning Representations (ICLR 2026)"),
+    {
+      decision: "accepted",
+      venueRaw: "ICLR 2026",
+      year: 2026,
+      track: "unknown",
+      presentation: "unknown",
+      commentRaw: "The 14th International Conference on Learning Representations (ICLR 2026)",
+    },
+  );
+  assert.equal(parseArxivCommentAcceptance("This paper was not accepted at ICLR"), null);
+});
+
+test("arXiv comment venue hints remain usable without claiming submission acceptance", () => {
+  assert.deepEqual(parseArxivCommentVenueHint("Submitted to ICLR 2026"), {
+    acronym: "ICLR",
+    venueRaw: "ICLR 2026",
+    year: 2026,
+  });
+  assert.deepEqual(
+    parseArxivCommentVenueHint("The 11th International Conference on Learning Representations (ICLR 2023)"),
+    { acronym: "ICLR", venueRaw: "ICLR 2023", year: 2023 },
+  );
+  assert.deepEqual(parseArxivCommentVenueHint("ICLR2023"), {
+    acronym: "ICLR",
+    venueRaw: "ICLR 2023",
+    year: 2023,
+  });
+  assert.equal(parseArxivCommentVenueHint("12 pages, 4 figures"), null);
+  assert.equal(
+    parseArxivCommentAcceptance("Code for the International Conference on Learning Representations (ICLR 2023)"),
+    null,
+  );
 });
 
 test("an accepted Main record outranks a newer rejected record", () => {
@@ -197,6 +309,22 @@ test("DBLP verifies identity without claiming verified decision or track", () =>
   assert.equal(result.verification, "probable");
 });
 
+test("Crossref publication metadata cannot verify decision or track", () => {
+  const result = resolveRecords([{
+    source: "crossref",
+    venueRaw: "ACL",
+    decisionRaw: "Published",
+    trackRaw: "",
+    matchScore: 1,
+    matchKind: "identifier",
+  }]);
+  assert.deepEqual(result.verificationAxes, {
+    identity: "verified",
+    decision: "metadata_only",
+    track: "unverified",
+  });
+});
+
 test("official proceedings can verify decision and an explicit track", () => {
   const result = resolveRecords([{
     source: "proceedings",
@@ -215,7 +343,7 @@ test("official proceedings can verify decision and an explicit track", () => {
   assert.equal(result.verification, "verified");
 });
 
-test("short filename uses text before the first colon and one separator before arXiv ID", () => {
+test("default filename uses text before the first colon and one separator before arXiv ID", () => {
   assert.equal(
     buildFilename({ title: "Attention: A/B?", arxivId: "1706.03762" }, "alias"),
     "Attention_1706.03762.pdf",
@@ -224,8 +352,8 @@ test("short filename uses text before the first colon and one separator before a
 
 test("filename modes remain editable and portable", () => {
   const paper = { title: "A/B: C?", arxivId: "hep-th/9901001" };
+  assert.equal(buildFilename(paper, "short"), "A_B.pdf");
   assert.equal(buildFilename(paper, "full"), "A_B_ C_hep-th_9901001.pdf");
-  assert.equal(buildFilename(paper, "id"), "hep-th_9901001.pdf");
   assert.equal(buildFilename(paper, "custom", " my result "), "my result.pdf");
 });
 

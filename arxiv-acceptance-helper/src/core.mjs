@@ -48,42 +48,174 @@ function tokenSimilarity(left, right) {
   const b = new Set(normalizeText(right).split(" ").filter(Boolean));
   if (!a.size || !b.size) return 0;
   const shared = [...a].filter((token) => b.has(token)).length;
-  return shared / (a.size + b.size - shared);
+  const dice = (2 * shared) / (a.size + b.size);
+  const containment = shared / Math.min(a.size, b.size);
+  return Number((dice * 0.85 + containment * 0.15).toFixed(3));
 }
 
-function authorKeys(authors) {
-  return new Set(normalizeAuthors(authors).map((author) => {
-    const parts = normalizeText(author.includes(",") ? author.split(",", 1)[0] : author)
-      .split(" ")
-      .filter(Boolean);
-    return parts.at(-1) ?? "";
-  }).filter(Boolean));
+const AUTHOR_SUFFIXES = new Set(["ii", "iii", "iv", "jr", "junior", "sr", "senior"]);
+
+function authorParts(author) {
+  const raw = String(author ?? "").trim();
+  const comma = raw.indexOf(",");
+  let surnameTokens;
+  let givenTokens;
+
+  if (comma >= 0) {
+    surnameTokens = normalizeText(raw.slice(0, comma)).split(" ").filter(Boolean);
+    givenTokens = normalizeText(raw.slice(comma + 1)).split(" ").filter(Boolean);
+  } else {
+    const tokens = normalizeText(raw).split(" ").filter(Boolean);
+    while (tokens.length > 1 && AUTHOR_SUFFIXES.has(tokens.at(-1))) tokens.pop();
+    surnameTokens = tokens.length ? [tokens.at(-1)] : [];
+    givenTokens = tokens.slice(0, -1);
+  }
+
+  const surname = surnameTokens.join(" ");
+  const given = givenTokens.join(" ");
+  return {
+    full: [given, surname].filter(Boolean).join(" "),
+    surname,
+    givenTokens,
+  };
 }
 
-function authorOverlap(left, right) {
-  const a = authorKeys(left);
-  const b = authorKeys(right);
-  if (!a.size || !b.size) return 0;
-  return [...a].filter((name) => b.has(name)).length / Math.min(a.size, b.size);
+function initialsCompatible(left, right) {
+  if (!left.length || !right.length || left[0][0] !== right[0][0]) return false;
+  const length = Math.min(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    if (left[index] === right[index]) continue;
+    if (left[index][0] !== right[index][0]) return false;
+    if (left[index].length > 1 && right[index].length > 1) return false;
+  }
+  return true;
 }
 
-export function scorePaperMatch(paper, record) {
-  const paperDoi = normalizeDoi(paper?.publicationDoi ?? paper?.doi);
-  const recordDoi = normalizeDoi(record?.publicationDoi ?? record?.doi);
+function compareAuthorNames(left, right) {
+  if (!left.surname || left.surname !== right.surname) return { score: 0, kind: "none" };
+  if (left.full && left.full === right.full) return { score: 1, kind: "exact" };
+  if (!left.givenTokens.length || !right.givenTokens.length) return { score: 0.55, kind: "surname" };
+  if (initialsCompatible(left.givenTokens, right.givenTokens)) return { score: 0.9, kind: "initials" };
+  return { score: 0, kind: "surname-conflict" };
+}
+
+function authorEvidence(left, right) {
+  const a = normalizeAuthors(left).map(authorParts).filter((author) => author.surname);
+  const b = normalizeAuthors(right).map(authorParts).filter((author) => author.surname);
+  const evidence = {
+    score: 0,
+    matched: 0,
+    paperCount: a.length,
+    recordCount: b.length,
+    exact: 0,
+    initials: 0,
+    surnameOnly: 0,
+  };
+  if (!a.length || !b.length) return evidence;
+
+  const candidates = [];
+  for (let leftIndex = 0; leftIndex < a.length; leftIndex += 1) {
+    for (let rightIndex = 0; rightIndex < b.length; rightIndex += 1) {
+      const comparison = compareAuthorNames(a[leftIndex], b[rightIndex]);
+      if (comparison.score > 0) candidates.push({ leftIndex, rightIndex, ...comparison });
+    }
+  }
+  candidates.sort((leftCandidate, rightCandidate) => rightCandidate.score - leftCandidate.score);
+
+  const usedLeft = new Set();
+  const usedRight = new Set();
+  let total = 0;
+  for (const candidate of candidates) {
+    if (usedLeft.has(candidate.leftIndex) || usedRight.has(candidate.rightIndex)) continue;
+    usedLeft.add(candidate.leftIndex);
+    usedRight.add(candidate.rightIndex);
+    total += candidate.score;
+    evidence.matched += 1;
+    if (candidate.kind === "exact") evidence.exact += 1;
+    if (candidate.kind === "initials") evidence.initials += 1;
+    if (candidate.kind === "surname") evidence.surnameOnly += 1;
+  }
+  evidence.score = Number(((2 * total) / (a.length + b.length)).toFixed(3));
+  return evidence;
+}
+
+function yearEvidence(paperYearValue, recordYearValue) {
+  const paperYear = Number(paperYearValue);
+  const recordYear = Number(recordYearValue);
+  if (!Number.isInteger(paperYear) || !Number.isInteger(recordYear)) {
+    return { paperYear: paperYear || null, recordYear: recordYear || null, distance: null, score: 0 };
+  }
+  const distance = recordYear - paperYear;
+  let score;
+  if (distance === 0 || distance === 1) score = 1;
+  else if (distance === -1) score = 0.8;
+  else if (distance === 2) score = 0.8;
+  else if (distance === 3) score = 0.7;
+  else if (distance === 4) score = 0.6;
+  else if (distance === 5) score = 0.5;
+  else if (distance > 5) score = 0.25;
+  else score = 0;
+  return { paperYear, recordYear, distance, score };
+}
+
+function scorePaperSnapshot(paper, record) {
+  const paperDoi = normalizeDoi(paper?.publicationDoi || paper?.doi);
+  const recordDoi = normalizeDoi(record?.publicationDoi || record?.doi);
   const paperArxiv = normalizeArxivId(paper?.arxivId);
   const recordArxiv = normalizeArxivId(record?.arxivId);
+  const identifierConflict = (paperArxiv && recordArxiv && paperArxiv !== recordArxiv)
+    ? "arxiv"
+    : (paperDoi && recordDoi && paperDoi !== recordDoi) ? "doi" : "";
 
-  if ((paperDoi && paperDoi === recordDoi) || (paperArxiv && paperArxiv === recordArxiv)) {
-    return { score: 1, kind: "identifier" };
+  if (paperArxiv && paperArxiv === recordArxiv) {
+    return {
+      score: 1,
+      kind: "identifier",
+      evidence: { identifier: "arXiv ID", identifierConflict: "", title: null, authors: null, year: null },
+    };
+  }
+  if (paperDoi && paperDoi === recordDoi) {
+    return {
+      score: 1,
+      kind: "identifier",
+      evidence: { identifier: "publication DOI", identifierConflict: "", title: null, authors: null, year: null },
+    };
   }
 
   const title = tokenSimilarity(paper?.title, record?.title);
-  const authors = authorOverlap(paper?.authors, record?.authors);
-  const paperYear = Number(paper?.year);
-  const recordYear = Number(record?.year);
-  const year = paperYear && recordYear && Math.abs(paperYear - recordYear) <= 1 ? 1 : 0;
-  const score = Number((title * 0.75 + authors * 0.2 + year * 0.05).toFixed(3));
-  return { score, kind: title >= 0.95 && authors > 0 ? "title-authors" : "similarity" };
+  const authors = authorEvidence(paper?.authors, record?.authors);
+  const year = yearEvidence(paper?.year, record?.year);
+  let score = Number((title * 0.75 + authors.score * 0.2 + year.score * 0.05).toFixed(3));
+  if (identifierConflict === "arxiv") score = Math.min(score, 0.49);
+  if (identifierConflict === "doi" && title < 0.8) score = Math.min(score, 0.6);
+  return {
+    score,
+    kind: title >= 0.93 && authors.score > 0 ? "title-authors" : "similarity",
+    evidence: {
+      identifier: "",
+      identifierConflict,
+      title,
+      authors,
+      year,
+    },
+  };
+}
+
+export function scorePaperMatch(paper, record) {
+  const primary = scorePaperSnapshot(paper, record);
+  if (primary.kind === "identifier" || !Array.isArray(paper?.metadataAliases)) return primary;
+
+  let best = primary;
+  for (const alias of paper.metadataAliases) {
+    const candidate = scorePaperSnapshot({ ...paper, ...alias, metadataAliases: [] }, record);
+    if (candidate.score > best.score) {
+      best = {
+        ...candidate,
+        evidence: { ...candidate.evidence, metadataVersion: Number(alias.version) || null },
+      };
+    }
+  }
+  return best;
 }
 
 export function normalizeDecision(raw) {
@@ -112,6 +244,69 @@ export function normalizePresentation(raw) {
   if (/\bspotlight\b/.test(value)) return "spotlight";
   if (/\bposter\b/.test(value)) return "poster";
   return "unknown";
+}
+
+export function parseArxivCommentAcceptance(comment) {
+  const raw = String(comment ?? "").replace(/\s+/g, " ").trim();
+  if (!raw || /\b(?:not|never)\s+accepted\b|\bacceptance\s+(?:pending|unknown)\b|\bwithdrawn\b/i.test(raw)) return null;
+
+  const patterns = [
+    /\baccepted\s+to\s+appear\s+(?:at|in)\s+([^.;]+)/i,
+    /\baccepted\s+(?:as|for)\s+(?:an?\s+)?(?:oral|poster|spotlight)(?:\s+presentation)?\s+at\s+([^.;]+)/i,
+    /\baccepted\s+(?:at|in|to|by|for)\s+([^.;]+)/i,
+    /\bto\s+appear\s+(?:at|in)\s+([^.;]+)/i,
+    /\bpublished\s+(?:at|in)\s+([^.;]+)/i,
+    /\bcamera[- ]ready(?:\s+version)?\s+(?:for|at)\s+([^.;]+)/i,
+  ];
+  const match = patterns.map((pattern) => raw.match(pattern)).find(Boolean);
+  const nonAcceptanceState = /\b(?:submission|submitted|under review|in review|rejected|rejection)\b/i.test(raw);
+  const standalone = /^(?:this\s+paper\s+(?:has\s+been\s+)?)?accepted(?:\s+with\s+(?:minor|major)\s+revisions?)?[.!]?$/i
+    .test(raw);
+  const venueHint = parseArxivCommentVenueHint(raw);
+  const publicationStyleVenue = venueHint && (
+    /^(?:the\s+)?(?:\d+(?:st|nd|rd|th)\s+)?(?:international|annual)?\s*(?:conference|symposium|workshop|proceedings|journal)\b/i.test(raw)
+    || new RegExp(`^${escapeRegExp(venueHint.acronym)}\\s*${venueHint.year}(?:\\b|[,.;])`, "i").test(raw)
+  );
+  if (!match && (nonAcceptanceState || (!standalone && !publicationStyleVenue))) return null;
+
+  const venueRaw = match
+    ? String(match[1] ?? "")
+        .replace(/\s*(?:\((?:oral|poster|spotlight)\)|,?\s+(?:as\s+)?(?:an?\s+)?(?:oral|poster|spotlight)(?:\s+presentation)?)\s*$/i, "")
+        .trim()
+    : venueHint?.venueRaw ?? "";
+  const track = normalizeTrack(raw);
+  return {
+    decision: "accepted",
+    venueRaw,
+    year: Number(raw.match(/\b(19|20)\d{2}\b/)?.[0]) || null,
+    track: ["main", "workshop", "findings"].includes(track) ? track : "unknown",
+    presentation: normalizePresentation(raw),
+    commentRaw: raw,
+  };
+}
+
+const COMMENT_VENUE_ACRONYM_STOPWORDS = new Set(["ARXIV", "DOI", "HTTP", "HTTPS", "PDF"]);
+
+export function parseArxivCommentVenueHint(comment) {
+  const raw = String(comment ?? "").replace(/\s+/g, " ").trim();
+  if (!raw) return null;
+
+  const candidates = [
+    ...raw.matchAll(/\(([A-Z][A-Z0-9.&-]{1,15})\s*[,/-]?\s*((?:19|20)\d{2})\)/g),
+    ...raw.matchAll(/\b([A-Z][A-Z0-9.&-]{1,15})\s*[,/-]?\s*((?:19|20)\d{2})\b/g),
+  ];
+  for (const match of candidates) {
+    const acronym = match[1].replace(/[.-]+$/g, "").toUpperCase();
+    if (COMMENT_VENUE_ACRONYM_STOPWORDS.has(acronym)) continue;
+    if ((acronym.match(/[A-Z]/g) ?? []).length < 2) continue;
+    const year = Number(match[2]);
+    return { acronym, venueRaw: `${acronym} ${year}`, year };
+  }
+  return null;
+}
+
+function escapeRegExp(value) {
+  return String(value ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function verificationAxesFor(record) {
@@ -226,8 +421,8 @@ export function buildFilename(paper, mode = "alias", custom = "") {
   const id = String(paper?.arxivId ?? "paper").replace(/[\\/]/g, "_");
   const title = String(paper?.title ?? "paper").trim() || "paper";
   if (mode === "custom" && String(custom).trim()) return sanitizeFilename(custom);
-  if (mode === "id") return sanitizeFilename(id);
   const selectedTitle = mode === "full" ? title : (title.split(":", 1)[0].trim() || title);
+  if (mode === "short") return sanitizeFilename(selectedTitle);
   const safeId = sanitizeFilename(id).slice(0, -4);
   let safeTitle = sanitizeFilename(selectedTitle).slice(0, -4).replace(/_+$/g, "") || "paper";
   const encoder = new TextEncoder();

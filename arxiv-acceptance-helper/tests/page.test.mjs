@@ -5,9 +5,11 @@ import {
   classifyProjectUrl,
   cleanArxivLabel,
   dedupeProjectLinks,
+  formatMatchEvidence,
   formatVenueYear,
   panelViewModel,
   parseArxivId,
+  parseArxivVersion,
 } from "../src/page.mjs";
 
 test("arXiv IDs preserve legacy categories and drop version suffixes", () => {
@@ -15,6 +17,9 @@ test("arXiv IDs preserve legacy categories and drop version suffixes", () => {
   assert.equal(parseArxivId("/abs/1706.03762v7"), "1706.03762");
   assert.equal(parseArxivId("/pdf/1706.03762.pdf"), "1706.03762");
   assert.equal(parseArxivId("/list/cs.AI/recent"), "");
+  assert.equal(parseArxivVersion("/abs/hep-th/9901001v3"), 3);
+  assert.equal(parseArxivVersion("/pdf/1706.03762v7.pdf"), 7);
+  assert.equal(parseArxivVersion("/abs/1706.03762"), null);
 });
 
 test("arXiv labels are removed only from the beginning", () => {
@@ -33,10 +38,15 @@ test("known project hosts are accepted as direct evidence", () => {
     label: "GitHub",
     source: "pdf-annotation",
     evidence: "PDF link annotation",
+    page: null,
+    section: "unknown",
+    context: "repository",
+    classification: "paperProjectLink",
   });
   assert.equal(classifyProjectUrl("https://huggingface.co/org/model", { source: "pdf-text" }).label, "Hugging Face");
   assert.equal(classifyProjectUrl("https://org.github.io/project/", { source: "paper-html" }).label, "Project page");
   assert.equal(classifyProjectUrl("https://www.github.com/org/repo", { source: "paper-html" }).label, "GitHub");
+  assert.equal(classifyProjectUrl("https://codeberg.org/org/repo", { source: "paper-text" }).label, "Codeberg");
 });
 
 test("keyword-labeled external links can be project pages", () => {
@@ -53,6 +63,25 @@ test("unsafe and bibliography hosts are rejected", () => {
   assert.equal(classifyProjectUrl("https://doi.org/10.1/x", { source: "paper-html", text: "code" }), null);
   assert.equal(classifyProjectUrl("https://dblp.org/rec/conf/x", { source: "paper-html", text: "project" }), null);
   assert.equal(classifyProjectUrl("https://arxiv.org/pdf/1", { source: "paper-html", text: "code" }), null);
+});
+
+test("PDF GitHub links distinguish current-paper context from citations and unknown links", () => {
+  assert.equal(classifyProjectUrl("https://github.com/org/code", {
+    source: "pdf-text",
+    page: 2,
+    section: "body",
+    context: "Official implementation repository",
+  }).classification, "paperProjectLink");
+  assert.equal(classifyProjectUrl("https://github.com/cited/code", {
+    source: "pdf-annotation",
+    page: 9,
+    section: "references",
+  }).classification, "citationProjectLink");
+  assert.equal(classifyProjectUrl("https://github.com/unknown/code", {
+    source: "pdf-annotation",
+    page: 5,
+    section: "body",
+  }).classification, "unknownGithubLink");
 });
 
 test("project links deduplicate fragments and prefer paper HTML evidence", () => {
@@ -121,9 +150,54 @@ test("panel view model exposes accepted venue, explicit track, and presentation"
   assert.equal(view.verificationAxesLabel, "Identity Probable · Decision Verified · Track Verified");
 });
 
+test("panel view model clearly labels an arXiv-comment fallback", () => {
+  const view = panelViewModel({
+    representative: {
+      source: "arxiv-comment",
+      venueRaw: "ICLR 2026",
+      year: 2026,
+      decision: "accepted",
+      track: "unknown",
+      presentation: "poster",
+    },
+    records: [],
+    verification: "self_reported",
+    verificationAxes: { identity: "verified", decision: "self_reported", track: "unverified" },
+  });
+  assert.equal(view.headline, "ICLR 2026 · Accepted · Poster");
+  assert.equal(view.verificationLabel, "Author-reported");
+  assert.match(view.fallbackNotice, /author-provided arXiv comment/);
+});
+
 test("venue formatting does not repeat an existing year", () => {
   assert.equal(formatVenueYear("ICLR 2025 Conference", 2025), "ICLR 2025 Conference");
   assert.equal(formatVenueYear("ICLR", 2025), "ICLR 2025");
+});
+
+test("match evidence presents a heuristic score rationale without probability wording", () => {
+  const text = formatMatchEvidence({
+    matchEvidence: {
+      identifier: "",
+      identifierConflict: "",
+      title: 0.96,
+      authors: {
+        matched: 2,
+        paperCount: 3,
+        recordCount: 2,
+        exact: 1,
+        initials: 1,
+        surnameOnly: 0,
+      },
+      year: { distance: 2 },
+      metadataVersion: 1,
+    },
+  });
+  assert.match(text, /title 96\/100/);
+  assert.match(text, /full-name 1/);
+  assert.match(text, /initial-compatible 1/);
+  assert.match(text, /publication year \+2/);
+  assert.match(text, /arXiv v1 metadata/);
+  assert.doesNotMatch(text, /%|confidence/i);
 });
 
 test("panel view model labels conflicts without discarding chronological records", () => {
@@ -135,6 +209,30 @@ test("panel view model labels conflicts without discarding chronological records
   });
   assert.equal(view.verificationLabel, "Conflicting");
   assert.deepEqual(view.records.map((record) => record.year), [2026, 2025]);
+});
+
+test("panel view model separates identity matches from search candidates and ranks by match score", () => {
+  const view = panelViewModel({
+    records: [
+      { sourceId: "candidate-new", confidence: "candidate", matchScore: 0.81, year: 2027 },
+      { sourceId: "match-low", confidence: "probable", matchScore: 0.84, year: 2026 },
+      { sourceId: "match-high", confidence: "verified", matchScore: 0.98, year: 2024 },
+      { sourceId: "candidate-high", confidence: "candidate", matchScore: 0.7, year: 2028 },
+    ],
+  });
+
+  assert.deepEqual(
+    view.matchedRecords.map((record) => record.sourceId),
+    ["match-high", "match-low"],
+  );
+  assert.deepEqual(
+    view.candidateRecords.map((record) => record.sourceId),
+    ["candidate-new", "candidate-high"],
+  );
+  assert.deepEqual(
+    view.records.map((record) => record.sourceId),
+    ["match-high", "match-low", "candidate-new", "candidate-high"],
+  );
 });
 
 test("cached panel results expose a human-readable cache age", () => {

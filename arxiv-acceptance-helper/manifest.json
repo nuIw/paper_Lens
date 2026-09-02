@@ -1,21 +1,34 @@
 {
   "manifest_version": 3,
-  "name": "arXiv Acceptance Helper",
+  "name": "arXivLens",
   "version": "0.1.0",
-  "description": "Shows venue evidence and code links, then downloads arXiv PDFs with an editable filename.",
+  "description": "Research companion for venue evidence, code links, and named arXiv PDF downloads.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "incognito": "not_allowed",
   "permissions": [
-    "downloads",
     "storage"
+  ],
+  "optional_permissions": [
+    "downloads"
   ],
   "host_permissions": [
     "https://arxiv.org/*",
     "https://dblp.org/*",
+    "https://api.crossref.org/*",
+    "https://api.semanticscholar.org/*",
     "https://api2.openreview.net/*",
     "https://api.openreview.net/*",
     "https://openaccess.thecvf.com/*",
     "https://aclanthology.org/*",
     "https://proceedings.mlr.press/*",
-    "https://proceedings.neurips.cc/*",
+    "https://proceedings.neurips.cc/*"
+  ],
+  "optional_host_permissions": [
     "https://api.github.com/*"
   ],
   "background": {

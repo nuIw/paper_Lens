@@ -3,14 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Backend-free Chrome extension for arXiv venue evidence, code links, and named PDF downloads.",
+  "description": "arXivLens: backend-free venue evidence, code discovery, and named PDF downloads.",
   "scripts": {
     "vendor": "node scripts/vendor-pdfjs.mjs",
     "build": "npm run vendor && node scripts/validate-extension.mjs",
     "lint": "node scripts/lint.mjs",
     "test": "node --test",
     "test:coverage": "node --test --experimental-test-coverage",
-    "verify": "npm run build && npm run lint && npm test"
+    "verify": "npm run build && npm run lint && npm test",
+    "package:extension": "npm run verify && node scripts/package-extension.mjs"
   },
   "dependencies": {
     "pdfjs-dist": "4.10.38"
