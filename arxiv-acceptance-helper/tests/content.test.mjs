@@ -535,4 +535,7 @@ test("arXivLens stays idle until its controls are opened", async () => {
   assert.match(css, /:host\(\.ah-details-host\) \.ah-trigger/);
   assert.match(source, /const titleRow = element\("div", "ah-title-row"\)/);
   assert.match(css, /\.ah-title-row\s*\{[^}]*display:\s*flex/s);
+  assert.match(source, /1FAIpQLSeOJJYTgYR0mPDoJMh8f1_SOzRItbLI_a0V325KRNgE-Y17ZQ\/viewform/);
+  assert.match(source, /reportUrl\.searchParams\.set\("entry\.15985915", viewedPaper\.pageUrl\)/);
+  assert.match(source, /header\.append\(refresh, report\)/);
 });

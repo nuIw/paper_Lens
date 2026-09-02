@@ -683,7 +683,12 @@ async function mount() {
     refresh.addEventListener("click", () => {
       if (state.analysisStatus !== "loading") loadAnalysis(true);
     });
-    header.append(refresh);
+    const reportUrl = new URL("https://docs.google.com/forms/d/e/1FAIpQLSeOJJYTgYR0mPDoJMh8f1_SOzRItbLI_a0V325KRNgE-Y17ZQ/viewform");
+    reportUrl.searchParams.set("usp", "pp_url");
+    reportUrl.searchParams.set("entry.15985915", viewedPaper.pageUrl);
+    const report = safeLink(reportUrl.href, "Report issue", "ah-icon-button ah-report-link");
+    report.dataset.focusKey = "report-issue";
+    header.append(refresh, report);
     return header;
   }
 

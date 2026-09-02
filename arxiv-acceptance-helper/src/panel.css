@@ -202,6 +202,12 @@ summary:focus-visible {
   font-size: 0.78rem;
 }
 
+.ah-report-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
 button:disabled,
 button[aria-disabled="true"] {
   cursor: wait;
