@@ -1,0 +1,236 @@
+.venuetrace-result {
+  box-sizing: border-box;
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid #d6dde6;
+  border-top: 3px solid #0f766e;
+  border-radius: 0.4rem;
+  background: #ffffff;
+  box-shadow: 0 0.15rem 0.55rem rgba(15, 23, 42, 0.07);
+  color: #1e293b;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.venuetrace-result[data-confidence="high"] {
+  border-top-color: #0f766e;
+}
+
+.venuetrace-result[data-confidence="none"] {
+  border-top-color: #94a3b8;
+}
+
+.venuetrace-result ul {
+  margin: 0.75rem 0 0;
+  padding: 0 0 0 1.2rem;
+}
+
+.venuetrace-result a {
+  color: #075985;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.15rem;
+}
+
+.venuetrace-result a:hover {
+  color: #0c4a6e;
+}
+
+.venuetrace-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.65rem;
+}
+
+.venuetrace-brand {
+  color: #102a43;
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.venuetrace-status {
+  display: inline-block;
+  padding: 0.12rem 0.45rem;
+  border: 1px solid #c7d2dc;
+  border-radius: 0.3rem;
+  background: #f4f7f9;
+  color: #334155;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.venuetrace-result[data-confidence="high"] .venuetrace-status {
+  border-color: #99c8c2;
+  background: #edf8f6;
+  color: #0f625a;
+}
+
+.venuetrace-result[data-confidence="none"] .venuetrace-status {
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.venuetrace-summary {
+  flex-basis: 100%;
+  margin: 0;
+  color: #64748b;
+  font-size: 0.86rem;
+}
+
+.venuetrace-confidence {
+  margin: 0.65rem 0 0;
+  color: #52677b;
+  font-size: 0.78rem;
+}
+
+.venuetrace-confidence strong {
+  color: #334e68;
+}
+
+.venuetrace-verdict {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0;
+  margin-top: 0.9rem;
+  overflow: hidden;
+  border: 1px solid #d6e0e8;
+  border-radius: 0.35rem;
+  background: #f7fafb;
+}
+
+.venuetrace-verdict-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.75rem 0.85rem;
+  background: transparent;
+}
+
+.venuetrace-verdict-item + .venuetrace-verdict-item {
+  border-left: 1px solid #dbe4ea;
+}
+
+.venuetrace-verdict-item span {
+  color: #60758a;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.venuetrace-verdict-item strong {
+  color: #102a43;
+  font-size: 1.02rem;
+}
+
+.venuetrace-projects {
+  margin-top: 0.8rem;
+}
+
+.venuetrace-details,
+.venuetrace-projects {
+  padding-top: 0.75rem;
+  border-top: 1px solid #e1e7ed;
+}
+
+.venuetrace-details {
+  margin-top: 0.9rem;
+}
+
+.venuetrace-details summary,
+.venuetrace-projects summary {
+  width: fit-content;
+  color: #334e68;
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 700;
+  list-style-position: outside;
+}
+
+.venuetrace-details li {
+  margin-top: 0.35rem;
+  color: #475569;
+  font-size: 0.84rem;
+}
+
+.venuetrace-repository {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 0.3rem 0.8rem;
+  margin: 0.7rem 0 0;
+  padding: 0.75rem;
+  border: 1px solid #dbe3ea;
+  border-radius: 0.3rem;
+  background: #fbfcfd;
+  color: #475569;
+  font-size: 0.82rem;
+}
+
+.venuetrace-repository dt {
+  color: #334155;
+  font-weight: 700;
+}
+
+.venuetrace-repository dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.venuetrace-download {
+  margin-top: 0.9rem;
+  padding: 0.55rem 0.85rem;
+  border: 0;
+  border-radius: 0.3rem;
+  background: #075985;
+  color: #ffffff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 700;
+  transition: background 120ms ease;
+}
+
+.venuetrace-download:hover:not(:disabled) {
+  background: #0c4a6e;
+}
+
+.venuetrace-download:focus-visible,
+.venuetrace-result summary:focus-visible,
+.venuetrace-result a:focus-visible {
+  outline: 2px solid #0891b2;
+  outline-offset: 2px;
+}
+
+.venuetrace-download:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.venuetrace-errors {
+  display: block;
+  margin-top: 0.65rem;
+  color: #b45309;
+  font-size: 0.78rem;
+}
+
+@media (max-width: 42rem) {
+  .venuetrace-result {
+    padding: 0.85rem;
+  }
+
+  .venuetrace-repository {
+    grid-template-columns: 1fr;
+    gap: 0.1rem;
+  }
+
+  .venuetrace-verdict-item + .venuetrace-verdict-item {
+    padding-left: 0.85rem;
+    border-top: 1px solid #e2e8f0;
+    border-left: 0;
+  }
+
+  .venuetrace-repository dd + dt {
+    margin-top: 0.35rem;
+  }
+}

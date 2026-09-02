@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "VenueTrace",
+  "version": "0.4.0",
+  "background": {
+    "service_worker": "src/background/service-worker.js"
+  },
+  "host_permissions": [
+    "https://dblp.org/*",
+    "https://api2.openreview.net/*",
+    "https://api.crossref.org/*",
+    "https://api.openalex.org/*",
+    "https://api.github.com/*",
+    "https://neurips.cc/*",
+    "https://openaccess.thecvf.com/*"
+  ],
+  "permissions": ["downloads"],
+  "content_scripts": [
+    {
+      "matches": ["https://arxiv.org/abs/*"],
+      "js": [
+        "src/code-links/find-links.js",
+        "src/ui/evidence-panel.js",
+        "src/content/arxiv.js"
+      ],
+      "css": ["src/content/arxiv.css"]
+    }
+  ]
+}
