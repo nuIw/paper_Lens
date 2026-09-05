@@ -14,7 +14,7 @@ function node(textContent = "", href = "") {
   return { textContent, href };
 }
 
-test("summary and details hosts use the title/authors and References/Bookmark boundaries", () => {
+test("summary and details hosts use the title and bottom of Bookmark boundaries", () => {
   const placements = [];
   const title = { insertAdjacentElement: (position, host) => placements.push(["title", position, host]) };
   const bookmark = { insertAdjacentElement: (position, host) => placements.push(["bookmark", position, host]) };
@@ -28,7 +28,7 @@ test("summary and details hosts use the title/authors and References/Bookmark bo
   assert.equal(placePanelHosts(doc, summaryHost, detailsHost), true);
   assert.deepEqual(placements, [
     ["title", "afterend", summaryHost],
-    ["bookmark", "beforebegin", detailsHost],
+    ["bookmark", "afterend", detailsHost],
   ]);
 });
 
@@ -533,4 +533,9 @@ test("arXivLens stays idle until its controls are opened", async () => {
   assert.match(source, /\.bookmarks/);
   assert.match(css, /grid-template-columns:\s*minmax\(0, 0\.8fr\) minmax\(0, 2fr\) auto/);
   assert.match(css, /:host\(\.ah-details-host\) \.ah-trigger/);
+  assert.match(source, /const titleRow = element\("div", "ah-title-row"\)/);
+  assert.match(css, /\.ah-title-row\s*\{[^}]*display:\s*flex/s);
+  assert.match(source, /1FAIpQLSeOJJYTgYR0mPDoJMh8f1_SOzRItbLI_a0V325KRNgE-Y17ZQ\/viewform/);
+  assert.match(source, /reportUrl\.searchParams\.set\("entry\.15985915", viewedPaper\.pageUrl\)/);
+  assert.match(source, /header\.append\(refresh, report\)/);
 });
