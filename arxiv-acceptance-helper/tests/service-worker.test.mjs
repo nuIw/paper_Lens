@@ -484,6 +484,28 @@ test("GitHub and download permissions are requested only for their user actions"
   assert.equal(downloadCalls.length, 1);
 });
 
+test("download API is resolved after its optional permission is granted", async () => {
+  let downloadApi;
+  const service = createService({
+    permissions: {
+      async request() {
+        downloadApi = { download: async () => 7 };
+        return true;
+      },
+    },
+    getDownloads: () => downloadApi,
+  });
+
+  const result = await service.handleMessage({
+    type: "DOWNLOAD_PDF",
+    pdfUrl: paper.pdfUrl,
+    filename: "Attention_1706.03762.pdf",
+    saveAs: true,
+  });
+
+  assert.deepEqual(result, { ok: true, data: { downloadId: 7 } });
+});
+
 test("a denied optional permission prevents its privileged action", async () => {
   const service = createService({
     fetchImpl: async () => { throw new Error("must not fetch"); },

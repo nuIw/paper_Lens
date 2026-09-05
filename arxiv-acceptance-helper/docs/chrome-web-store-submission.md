@@ -27,7 +27,7 @@ OpenReview, 공식 proceedings 및 사용자가 권한을 허용한 경우 GitHu
   데이터로만 처리함
 - Limited Use certification: 모두 확인
 - Privacy policy URL:
-  `https://github.com/nuIw/ArXiv_Lens/blob/main/arxiv-acceptance-helper/PRIVACY.md`
+  `https://github.com/nuIw/paper_Lens/blob/main/arxiv-acceptance-helper/PRIVACY.md`
 
 ## 권한 설명
 

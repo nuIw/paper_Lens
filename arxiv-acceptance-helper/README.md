@@ -1,5 +1,5 @@
 <p align="center">
-  <h1 align="center">arXivLens</h1>
+  <h1 align="center">paper_Lens</h1>
   <h3 align="center">
     Conference Evidence, Code Discovery, and Smart PDF Downloads for arXiv
   </h3>

@@ -132,6 +132,7 @@ export function createService({
   storageLocal,
   storageSession,
   downloads,
+  getDownloads = () => downloads,
   permissions,
   now = Date.now,
 }) {
@@ -932,7 +933,9 @@ export function createService({
         return { ok: true, data: await queueGitHubSearch(message.paper) };
       }
       await requireOptionalPermission({ permissions: ["downloads"] }, "Download");
-      const downloadId = await downloads.download({
+      const downloadApi = getDownloads();
+      if (!downloadApi?.download) throw new Error("Download API is unavailable.");
+      const downloadId = await downloadApi.download({
         url: message.pdfUrl,
         filename: message.filename,
         saveAs: message.saveAs,
@@ -953,7 +956,7 @@ if (globalThis.chrome?.runtime?.onMessage) {
     fetchImpl: globalThis.fetch.bind(globalThis),
     storageLocal: chrome.storage.local,
     storageSession: chrome.storage.session,
-    downloads: chrome.downloads,
+    getDownloads: () => chrome.downloads,
     permissions: chrome.permissions,
   });
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
